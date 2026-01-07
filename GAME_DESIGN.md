@@ -14,6 +14,9 @@ A classic Snake game implemented in Python using Pygame. The player controls a s
 ### Controls
 - **Arrow Keys**: Change snake direction (Up, Down, Left, Right)
 - **Space Bar**: Restart game after game over
+- **Powerup Selection** (every 3 apples):
+  - Left/Right Arrow Keys: Navigate powerup options
+  - Enter or Space: Select powerup
 
 ### Game Loop
 1. Snake moves continuously in its current direction
@@ -44,9 +47,13 @@ A classic Snake game implemented in Python using Pygame. The player controls a s
 ### Food System
 - **Appearance**: Red rounded square (20x20 pixels) with pulsing animation
 - **Animation**: Continuous size pulse using sine wave (±3 pixels)
-- **Spawn Logic**: Random position on grid, avoiding snake body
+- **Spawn Logic**: Random position on grid, avoiding snake body and obstacles
 - **Collision**: Triggers when snake head occupies same cell as food
-- **Effect**: +10 points, snake grows by 1 segment, food respawns, particle burst spawns
+- **Effect**: +10 points, snake grows by 1 segment, food respawns, triggers **HYPE EFFECTS**:
+  - Enhanced particle burst (28 particles: red + yellow mix)
+  - Screen shake (8 pixels, 300ms decay)
+  - Screen flash (white, 150ms fade)
+  - Score zoom animation (1.5x to 1.0x scale with yellow highlight)
 
 ### Collision Detection
 - **Wall Collision**: Snake head moves outside grid bounds (x < 0, x >= 30, y < 0, y >= 30)
@@ -54,9 +61,64 @@ A classic Snake game implemented in Python using Pygame. The player controls a s
 - **Food Collision**: Snake head coordinates match food coordinates
 
 ### Scoring System
-- **Points Per Food**: 10 points
+- **Points Per Food**: 10 points (20 with Double Points powerup)
 - **High Score**: Persistent across game sessions, stored in JSON file
 - **Display**: Current score and high score shown during gameplay
+- **Powerup Trigger**: Every 3 apples collected unlocks a powerup selection
+
+### Powerup System
+
+**Trigger Mechanism:**
+- Every 3 apples collected pauses the game
+- Player presented with 3 random powerup options
+- Game remains paused until selection is made
+- Selected powerup activates immediately
+
+**Available Powerups:**
+
+1. **Shield** (Cyan)
+   - Effect: Survive one collision (wall, obstacle, or self)
+   - Duration: One-time use
+   - Visual: Cyan particle explosion when shield breaks
+   - Activation: Creates intense screen shake on break
+
+2. **Double Points** (Yellow)
+   - Effect: Next 5 apples worth 20 points instead of 10
+   - Duration: 5 apples
+   - Visual: All-yellow particle burst on collection
+   - Counter: Shows remaining apples in indicator
+
+3. **Ghost Mode** (Purple)
+   - Effect: Pass through own tail without dying
+   - Duration: 10 seconds
+   - Visual: Purple-tinted powerup indicator
+   - Gameplay: Only wall and obstacle collisions are fatal
+
+4. **Speed Boost** (Orange)
+   - Effect: 50% faster movement speed
+   - Duration: 15 seconds
+   - Visual: Orange powerup indicator with countdown
+   - Gameplay: Move delay reduced from 100ms to 50ms
+
+**Selection UI:**
+- Semi-transparent dark overlay (180 alpha)
+- 3 animated cards with powerup information
+- Selected card pulses with white border
+- Each card shows:
+  - Powerup icon (emoji or text symbol)
+  - Powerup name
+  - Brief description
+  - Color-coded background
+- Instructions displayed at bottom
+- Arrow keys for navigation, Enter/Space to confirm
+
+**Active Powerup Indicators:**
+- Display below high score (top-left area)
+- Color-coded bars matching powerup type
+- Show powerup icon and name
+- Timer or counter for remaining duration/uses
+- Auto-cleanup when expired
+- Multiple powerups can be active simultaneously
 
 ## Visual Design
 
@@ -66,8 +128,14 @@ A classic Snake game implemented in Python using Pygame. The player controls a s
 - **Snake Body**: Green gradient (0, 255-100, 0) - fades from head to tail
 - **Snake Outline**: Dark Green (0, 180, 0)
 - **Food**: Red (255, 0, 0)
-- **Particles**: Red (255, 0, 0) with alpha fade
-- **Text**: White (255, 255, 255)
+- **Particles**: Red and Yellow (255, 0, 0) / (255, 255, 0) with alpha fade
+- **Text**: White (255, 255, 255) / Yellow (255, 255, 0) for score flash
+- **Countdown**: White for numbers, Green for "GO!"
+- **Powerups**: 
+  - Shield: Cyan (0, 255, 255)
+  - Double Points: Yellow (255, 255, 0)
+  - Ghost Mode: Purple (128, 0, 255)
+  - Speed Boost: Orange (255, 165, 0)
 
 ### Graphics Style
 - **Snake**: Gradient effect from bright green head to darker tail, 4px rounded corners, dark green outline
@@ -77,13 +145,60 @@ A classic Snake game implemented in Python using Pygame. The player controls a s
 
 ### UI Elements
 - **Score Display**: Top-left corner, shows "Score: X"
+  - Animates with zoom effect (yellow, 1.5x scale) when collecting food
 - **High Score Display**: Below score, shows "High Score: X"
-- **Font**: Default system font, 36pt
+- **Powerup Indicators**: Below high score, shows active powerups with timers/counters
+- **Font**: Default system font, 36pt (24pt for powerup indicators)
 - **Game Over Screen**: Centered display showing:
   - "Game Over!" message
   - Final score
   - High score
   - "Press SPACE to restart" instruction
+- **Powerup Selection Screen**: Full-screen overlay with 3 animated cards
+
+## Game Feel & Juice
+
+### Countdown System
+- **Duration**: 3 seconds (3, 2, 1) + 0.5 seconds (GO!)
+- **Numbers (3, 2, 1)**:
+  - Zoom in from 150% to 100% scale over 0.3 seconds
+  - Bounce effect (±10% scale) for 0.1 seconds
+  - Rotation wobble (±5°) during zoom phase
+  - White text with glow effect
+- **"GO!" Text**:
+  - Explosive zoom from 50% to 130% then settle to 120%
+  - Half rotation spin (180°) during animation
+  - Green color with enhanced glow
+  - Creates anticipation and excitement before gameplay
+
+### Food Collection Effects (HYPE!)
+When the player collects food, multiple simultaneous effects create a satisfying, juicy experience:
+
+1. **Enhanced Particle Burst** (28 particles total)
+   - 20 particles in circular pattern with variable speeds (2±1 pixels/frame)
+   - 8 fast particles (4-6 pixels/frame) for extra emphasis
+   - Red and yellow color mix (2:1 ratio)
+   - Particles fade out over 600ms, shrink to 50% size
+
+2. **Screen Shake**
+   - 8 pixel intensity at peak
+   - Smooth decay over 300ms
+   - Random directional offset each frame
+   - Affects all visual elements (grid, particles, game objects)
+
+3. **Screen Flash**
+   - White overlay flash
+   - 80 alpha at peak
+   - Fades to transparent over 150ms
+   - Creates visual pop on collection
+
+4. **Score Zoom Animation**
+   - Score text scales from 1.5x to 1.0x over 300ms
+   - Color changes to yellow during animation
+   - Returns to white after animation completes
+   - Draws player attention to score increase
+
+**Design Philosophy**: These effects combine to create a powerful moment of feedback that makes every food collection feel impactful and rewarding, encouraging continued play and creating satisfying game feel.
 
 ## Game States
 
@@ -109,9 +224,11 @@ A classic Snake game implemented in Python using Pygame. The player controls a s
 
 ### Visual Effects Rendering
 - **Particle System**: Dynamic list, auto-cleanup of expired particles
-- **Alpha Blending**: Per-pixel alpha for smooth particle fade
-- **Animation Updates**: Food pulse and particles update every frame
-- **Draw Order**: Grid → Particles → Food → Snake → UI
+- **Alpha Blending**: Per-pixel alpha for smooth particle fade and screen flash
+- **Screen Shake**: Dynamic offset applied to all visual elements
+- **Animation Updates**: Food pulse, particles, score zoom, and shake update every frame
+- **Draw Order**: Grid (shaken) → Particles (shaken) → Obstacles → Food → Snake → UI → Flash Overlay
+- **Hype System**: Coordinated timing of multiple effects for maximum impact
 
 ## Data Persistence
 
@@ -163,9 +280,10 @@ A classic Snake game implemented in Python using Pygame. The player controls a s
 - `draw()`: Renders particle with alpha fade and size reduction
 
 **Behavior:**
-- 12 particles spawn radially when food is eaten
-- Each particle moves outward at 2 pixels/frame
-- Particles fade out over 500ms
+- 28 particles spawn in enhanced burst when food is eaten (20 standard + 8 fast)
+- Standard particles: 2±1 pixels/frame with red/yellow color mix
+- Fast particles: 4-6 pixels/frame in yellow
+- Particles fade out over 600ms
 - Particles shrink to 50% of original size (5px radius)
 - Auto-cleanup when expired
 
@@ -180,6 +298,29 @@ A classic Snake game implemented in Python using Pygame. The player controls a s
 - `save()`: Writes score to JSON file
 - `update()`: Saves if current score is new high score
 - `get_high_score()`: Returns current high score value
+
+### Powerup Class
+**Responsibilities:**
+- Define powerup types and metadata
+- Track powerup activation state
+- Manage duration/use counters
+- Check expiration conditions
+
+**Key Methods:**
+- `activate(current_time)`: Activates the powerup and starts timer
+- `is_expired(current_time)`: Returns True if powerup has expired
+- `get_remaining_time(current_time)`: Returns remaining seconds for duration-based powerups
+
+**Powerup Types:**
+- `SHIELD`: One-time collision protection
+- `DOUBLE_POINTS`: 2x score for 5 apples
+- `GHOST_MODE`: Pass through self for 10 seconds
+- `SPEED_BOOST`: 50% faster movement for 15 seconds
+
+**Metadata:**
+- Each powerup has name, description, color, duration, and icon
+- Stored in INFO dictionary for easy access
+- Used for rendering selection cards and active indicators
 
 ## Future Enhancement Ideas
 
@@ -217,3 +358,30 @@ A classic Snake game implemented in Python using Pygame. The player controls a s
 - **Replay System**: Save and watch previous games
 - **Mobile Controls**: Touch/swipe support for mobile devices
 - **Achievements**: Unlock badges for milestones
+
+## Change Log
+
+### January 2026
+- **Removed radial light effect**: Removed the pulsing white glow that appeared around the snake's head for a cleaner visual aesthetic
+- **Added dynamic countdown system**: Implemented animated countdown (3, 2, 1, GO!) with zoom, rotation, and bounce effects to build anticipation
+- **Enhanced food collection feedback**: Added comprehensive "juice" system with:
+  - Screen shake (8px, 300ms decay)
+  - Enhanced particle burst (28 particles with red/yellow mix)
+  - Screen flash effect (white overlay, 150ms fade)
+  - Score zoom animation (1.5x scale with yellow highlight)
+- **Improved game feel**: All effects work together to create satisfying, impactful moments that reward player actions and increase engagement
+- **Implemented powerup system**: Added strategic depth with 4 unique powerups:
+  - Shield: One-time collision protection with dramatic break effect
+  - Double Points: 2x score for next 5 apples with all-yellow particles
+  - Ghost Mode: Pass through own tail for 10 seconds
+  - Speed Boost: 50% faster movement for 15 seconds
+- **Added powerup selection UI**: Every 3 apples triggers animated selection screen with:
+  - 3 random powerup cards with pulsing animations
+  - Arrow key navigation and Enter/Space selection
+  - Color-coded cards with icons, names, and descriptions
+  - Game pause during selection for strategic decision-making
+- **Active powerup indicators**: Visual feedback system showing:
+  - Color-coded bars with powerup information
+  - Countdown timers for duration-based powerups
+  - Use counters for consumable powerups
+  - Multiple simultaneous powerup support
