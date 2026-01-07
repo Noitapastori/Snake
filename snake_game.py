@@ -703,21 +703,21 @@ def main():
                         
                         # Icon (larger)
                         icon_font = pygame.font.Font(None, 32)
-                        icon_text = icon_font.render(info['icon'], True, WHITE)
+                        icon_text = icon_font.render(info['icon'], True, BLACK)
                         icon_rect = icon_text.get_rect(center=(bar_x + 20, indicator_y + 20))
                         screen.blit(icon_text, icon_rect)
                         
                         # Name
-                        name_text = indicator_font.render(info['name'], True, WHITE)
+                        name_text = indicator_font.render(info['name'], True, BLACK)
                         screen.blit(name_text, (bar_x + 40, indicator_y + 8))
                         
                         # Timer or uses remaining
                         if powerup.type == Powerup.DOUBLE_POINTS:
-                            remaining_text = indicator_font.render(f'{powerup.remaining_uses} apples left', True, WHITE)
+                            remaining_text = indicator_font.render(f'{powerup.remaining_uses} apples left', True, BLACK)
                             screen.blit(remaining_text, (bar_x + 40, indicator_y + 32))
                         elif info['duration'] is not None:
                             remaining_time = powerup.get_remaining_time(current_time)
-                            time_text = indicator_font.render(f'{remaining_time:.1f}s remaining', True, WHITE)
+                            time_text = indicator_font.render(f'{remaining_time:.1f}s remaining', True, BLACK)
                             screen.blit(time_text, (bar_x + 40, indicator_y + 32))
                         
                         indicator_y += 70
@@ -770,13 +770,13 @@ def main():
                     
                     # Icon
                     icon_font = pygame.font.Font(None, 60)
-                    icon_text = icon_font.render(info['icon'], True, WHITE)
+                    icon_text = icon_font.render(info['icon'], True, BLACK)
                     icon_rect = icon_text.get_rect(center=(card_x + card_width // 2, card_y + 50))
                     screen.blit(icon_text, icon_rect)
                     
                     # Name
                     name_font = pygame.font.Font(None, 32)
-                    name_text = name_font.render(info['name'], True, WHITE)
+                    name_text = name_font.render(info['name'], True, BLACK)
                     name_rect = name_text.get_rect(center=(card_x + card_width // 2, card_y + 120))
                     screen.blit(name_text, name_rect)
                     
@@ -786,12 +786,12 @@ def main():
                     line1 = ' '.join(desc_lines[:3])
                     line2 = ' '.join(desc_lines[3:]) if len(desc_lines) > 3 else ''
                     
-                    desc_text1 = desc_font.render(line1, True, WHITE)
+                    desc_text1 = desc_font.render(line1, True, BLACK)
                     desc_rect1 = desc_text1.get_rect(center=(card_x + card_width // 2, card_y + 155))
                     screen.blit(desc_text1, desc_rect1)
                     
                     if line2:
-                        desc_text2 = desc_font.render(line2, True, WHITE)
+                        desc_text2 = desc_font.render(line2, True, BLACK)
                         desc_rect2 = desc_text2.get_rect(center=(card_x + card_width // 2, card_y + 175))
                         screen.blit(desc_text2, desc_rect2)
                 
