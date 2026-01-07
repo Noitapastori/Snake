@@ -7,7 +7,9 @@ import math
 # Constants
 GRID_SIZE = 30
 CELL_SIZE = 20
-WIDTH = GRID_SIZE * CELL_SIZE  # 600
+GRID_WIDTH = GRID_SIZE * CELL_SIZE  # 600
+PANEL_WIDTH = 200
+WIDTH = GRID_WIDTH + PANEL_WIDTH  # 800 (600 grid + 200 panel)
 HEIGHT = GRID_SIZE * CELL_SIZE  # 600
 FPS = 30
 MOVE_DELAY = 100  # milliseconds between moves (10 moves/second)
@@ -619,11 +621,18 @@ def main():
         # Drawing
         screen.fill(BLACK)
         
-        # Draw background grid (with shake offset)
-        for x in range(0, WIDTH, CELL_SIZE):
-            pygame.draw.line(screen, DARK_GRAY, (x + shake_x, shake_y), (x + shake_x, HEIGHT + shake_y))
+        # Draw panel background
+        panel_rect = pygame.Rect(GRID_WIDTH, 0, PANEL_WIDTH, HEIGHT)
+        pygame.draw.rect(screen, DARK_GRAY, panel_rect)
+        
+        # Draw separator line between grid and panel
+        pygame.draw.line(screen, WHITE, (GRID_WIDTH, 0), (GRID_WIDTH, HEIGHT), 2)
+        
+        # Draw background grid (with shake offset, only on grid area)
+        for x in range(0, GRID_WIDTH, CELL_SIZE):
+            pygame.draw.line(screen, (30, 30, 30), (x + shake_x, shake_y), (x + shake_x, HEIGHT + shake_y))
         for y in range(0, HEIGHT, CELL_SIZE):
-            pygame.draw.line(screen, DARK_GRAY, (shake_x, y + shake_y), (WIDTH + shake_x, y + shake_y))
+            pygame.draw.line(screen, (30, 30, 30), (shake_x, y + shake_y), (GRID_WIDTH + shake_x, y + shake_y))
         
         # Update and draw particles (with shake offset)
         particles = [p for p in particles if p.is_alive()]
@@ -644,7 +653,7 @@ def main():
             food.draw(screen)
             snake.draw(screen)
             
-            # Draw score with zoom effect
+            # Draw score with zoom effect in panel
             if score_flash_time > 0:
                 time_since_flash = current_time - score_flash_time
                 if time_since_flash < 300:  # Flash lasts 300ms
@@ -653,76 +662,93 @@ def main():
                     score_font_size = int(36 * scale)
                     score_font = pygame.font.Font(None, score_font_size)
                     score_text = score_font.render(f'Score: {score}', True, YELLOW)
+                    score_rect = score_text.get_rect(center=(GRID_WIDTH + PANEL_WIDTH // 2, 30))
+                    screen.blit(score_text, score_rect)
                 else:
                     score_text = font.render(f'Score: {score}', True, WHITE)
+                    score_rect = score_text.get_rect(center=(GRID_WIDTH + PANEL_WIDTH // 2, 30))
+                    screen.blit(score_text, score_rect)
             else:
                 score_text = font.render(f'Score: {score}', True, WHITE)
-            screen.blit(score_text, (10, 10))
+                score_rect = score_text.get_rect(center=(GRID_WIDTH + PANEL_WIDTH // 2, 30))
+                screen.blit(score_text, score_rect)
             
-            # Draw high score
+            # Draw high score in panel
             high_score_text = font.render(f'High Score: {score_manager.get_high_score()}', True, WHITE)
-            screen.blit(high_score_text, (10, 50))
+            high_score_rect = high_score_text.get_rect(center=(GRID_WIDTH + PANEL_WIDTH // 2, 70))
+            screen.blit(high_score_text, high_score_rect)
             
-            # Draw active powerup indicators
+            # Draw active powerup indicators in panel
             if active_powerups:
-                indicator_y = 90
-                indicator_font = pygame.font.Font(None, 24)
+                indicator_y = 120
+                indicator_font = pygame.font.Font(None, 22)
+                title_font = pygame.font.Font(None, 28)
+                
+                # Draw "Active Powerups" title
+                title_text = title_font.render('Active Powerups', True, YELLOW)
+                title_rect = title_text.get_rect(center=(GRID_WIDTH + PANEL_WIDTH // 2, 100))
+                screen.blit(title_text, title_rect)
+                
                 for powerup in active_powerups:
                     if powerup.active:
                         info = Powerup.INFO[powerup.type]
                         
-                        # Background bar
+                        # Background bar (centered in panel)
                         bar_width = 180
-                        bar_height = 30
-                        bar_rect = pygame.Rect(10, indicator_y, bar_width, bar_height)
-                        pygame.draw.rect(screen, info['color'], bar_rect, border_radius=5)
-                        pygame.draw.rect(screen, WHITE, bar_rect, 2, border_radius=5)
+                        bar_height = 60
+                        bar_x = GRID_WIDTH + (PANEL_WIDTH - bar_width) // 2
+                        bar_rect = pygame.Rect(bar_x, indicator_y, bar_width, bar_height)
+                        pygame.draw.rect(screen, info['color'], bar_rect, border_radius=8)
+                        pygame.draw.rect(screen, WHITE, bar_rect, 2, border_radius=8)
                         
-                        # Icon and name
-                        icon_text = indicator_font.render(info['icon'], True, WHITE)
-                        screen.blit(icon_text, (15, indicator_y + 5))
+                        # Icon (larger)
+                        icon_font = pygame.font.Font(None, 32)
+                        icon_text = icon_font.render(info['icon'], True, WHITE)
+                        icon_rect = icon_text.get_rect(center=(bar_x + 20, indicator_y + 20))
+                        screen.blit(icon_text, icon_rect)
                         
+                        # Name
                         name_text = indicator_font.render(info['name'], True, WHITE)
-                        screen.blit(name_text, (45, indicator_y + 5))
+                        screen.blit(name_text, (bar_x + 40, indicator_y + 8))
                         
                         # Timer or uses remaining
                         if powerup.type == Powerup.DOUBLE_POINTS:
-                            remaining_text = indicator_font.render(f'x{powerup.remaining_uses}', True, WHITE)
-                            screen.blit(remaining_text, (bar_width - 25, indicator_y + 5))
+                            remaining_text = indicator_font.render(f'{powerup.remaining_uses} apples left', True, WHITE)
+                            screen.blit(remaining_text, (bar_x + 40, indicator_y + 32))
                         elif info['duration'] is not None:
                             remaining_time = powerup.get_remaining_time(current_time)
-                            time_text = indicator_font.render(f'{remaining_time:.1f}s', True, WHITE)
-                            screen.blit(time_text, (bar_width - 35, indicator_y + 5))
+                            time_text = indicator_font.render(f'{remaining_time:.1f}s remaining', True, WHITE)
+                            screen.blit(time_text, (bar_x + 40, indicator_y + 32))
                         
-                        indicator_y += 35
+                        indicator_y += 70
             
-            # Screen flash effect when collecting food
+            # Screen flash effect when collecting food (only on grid area)
             if screen_flash_time > 0:
                 time_since_flash = current_time - screen_flash_time
                 if time_since_flash < 150:  # Flash lasts 150ms
                     flash_alpha = int(80 * (1 - time_since_flash / 150))
-                    flash_surface = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
+                    flash_surface = pygame.Surface((GRID_WIDTH, HEIGHT), pygame.SRCALPHA)
                     flash_surface.fill((255, 255, 255, flash_alpha))
                     screen.blit(flash_surface, (0, 0))
             
-            # Draw powerup selection screen
+            # Draw powerup selection screen (centered on grid)
             if powerup_selection_active:
-                # Semi-transparent overlay
-                overlay = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
+                # Semi-transparent overlay over grid only
+                overlay = pygame.Surface((GRID_WIDTH, HEIGHT), pygame.SRCALPHA)
                 overlay.fill((0, 0, 0, 180))
                 screen.blit(overlay, (0, 0))
                 
                 # Title
                 title_font = pygame.font.Font(None, 48)
                 title_text = title_font.render('Choose a Powerup!', True, YELLOW)
-                title_rect = title_text.get_rect(center=(WIDTH // 2, 80))
+                title_rect = title_text.get_rect(center=(GRID_WIDTH // 2, 80))
                 screen.blit(title_text, title_rect)
                 
                 # Draw 3 powerup cards
                 card_width = 150
                 card_height = 200
                 card_spacing = 30
-                start_x = (WIDTH - (card_width * 3 + card_spacing * 2)) // 2
+                start_x = (GRID_WIDTH - (card_width * 3 + card_spacing * 2)) // 2
                 card_y = 180
                 
                 for i, powerup_type in enumerate(powerup_choices):
@@ -840,7 +866,7 @@ def main():
                 if abs(rotation_angle) > 0.1:
                     text_surface = pygame.transform.rotate(text_surface, -rotation_angle)
                 
-                text_rect = text_surface.get_rect(center=(WIDTH // 2, HEIGHT // 2))
+                text_rect = text_surface.get_rect(center=(GRID_WIDTH // 2, HEIGHT // 2))
                 
                 # Add pulsing glow effect to countdown text
                 glow_font = pygame.font.Font(None, int(font_size * 1.1))
@@ -853,21 +879,28 @@ def main():
                         glow_surface = pygame.transform.rotate(glow_surface, -rotation_angle)
                     
                     glow_surface.set_alpha(alpha)
-                    glow_rect = glow_surface.get_rect(center=(WIDTH // 2, HEIGHT // 2))
+                    glow_rect = glow_surface.get_rect(center=(GRID_WIDTH // 2, HEIGHT // 2))
                     screen.blit(glow_surface, glow_rect)
                 
                 screen.blit(text_surface, text_rect)
         else:
             # Game over screen
-            game_over_text = font.render('Game Over!', True, WHITE)
-            score_text = font.render(f'Score: {score}', True, WHITE)
+            screen.fill(BLACK)
+            
+            # Draw panel background
+            panel_rect = pygame.Rect(GRID_WIDTH, 0, PANEL_WIDTH, HEIGHT)
+            pygame.draw.rect(screen, DARK_GRAY, panel_rect)
+            pygame.draw.line(screen, WHITE, (GRID_WIDTH, 0), (GRID_WIDTH, HEIGHT), 2)
+            
+            game_over_text = font.render('Game Over!', True, RED)
+            score_text = font.render(f'Final Score: {score}', True, WHITE)
             high_score_text = font.render(f'High Score: {score_manager.get_high_score()}', True, WHITE)
             restart_text = font.render('Press SPACE to restart', True, WHITE)
             
-            screen.blit(game_over_text, (WIDTH // 2 - game_over_text.get_width() // 2, HEIGHT // 2 - 80))
-            screen.blit(score_text, (WIDTH // 2 - score_text.get_width() // 2, HEIGHT // 2 - 20))
-            screen.blit(high_score_text, (WIDTH // 2 - high_score_text.get_width() // 2, HEIGHT // 2 + 20))
-            screen.blit(restart_text, (WIDTH // 2 - restart_text.get_width() // 2, HEIGHT // 2 + 80))
+            screen.blit(game_over_text, (GRID_WIDTH // 2 - game_over_text.get_width() // 2, HEIGHT // 2 - 60))
+            screen.blit(score_text, (GRID_WIDTH // 2 - score_text.get_width() // 2, HEIGHT // 2 - 20))
+            screen.blit(high_score_text, (GRID_WIDTH // 2 - high_score_text.get_width() // 2, HEIGHT // 2 + 20))
+            screen.blit(restart_text, (GRID_WIDTH // 2 - restart_text.get_width() // 2, HEIGHT // 2 + 60))
         
         pygame.display.flip()
         clock.tick(FPS)
