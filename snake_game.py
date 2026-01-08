@@ -4,7 +4,7 @@ import json
 import os
 import math
 
-# Constants
+# ===== DISPLAY CONSTANTS =====
 GRID_SIZE = 30
 CELL_SIZE = 20
 GRID_WIDTH = GRID_SIZE * CELL_SIZE  # 600
@@ -12,9 +12,44 @@ PANEL_WIDTH = 200
 WIDTH = GRID_WIDTH + PANEL_WIDTH  # 800 (600 grid + 200 panel)
 HEIGHT = GRID_SIZE * CELL_SIZE  # 600
 FPS = 30
-MOVE_DELAY = 100  # milliseconds between moves (10 moves/second)
 
-# Colors (R, G, B)
+# ===== GAME TIMING CONSTANTS =====
+MOVE_DELAY = 100  # milliseconds between moves (10 moves/second)
+COUNTDOWN_DURATION = 3500  # 3 seconds (3, 2, 1) + 0.5 seconds (GO!) = 3.5 seconds total
+GO_DURATION = 500  # "GO!" shows for 0.5 seconds
+DEATH_ANIMATION_DURATION = 2500  # 2.5 seconds
+SHIELD_BREAK_DURATION = 300  # milliseconds
+SCORE_FLASH_DURATION = 300  # milliseconds
+SCREEN_FLASH_DURATION = 150  # milliseconds
+SHIELD_TEXT_DURATION = 1000  # milliseconds
+
+# ===== ANIMATION CONSTANTS =====
+DEATH_ZOOM_START = 500  # ms before zoom starts
+DEATH_ZOOM_DURATION = 1500  # ms for zoom animation
+DEATH_ZOOM_MAX = 3.0  # maximum zoom scale
+DEATH_FADE_START = 2000  # ms before fade starts
+SHIELD_BREAK_PARTICLE_COUNT = 16
+COLLISION_PARTICLE_COUNT = 40
+COLLISION_SLOW_PARTICLES = 20
+FOOD_BURST_PARTICLES = 20
+FOOD_FAST_PARTICLES = 8
+SCREEN_SHAKE_DECAY = 8
+SCREEN_SHAKE_DURATION = 300
+
+# ===== SNAKE CONSTANTS =====
+SNAKE_START_X = 15
+SNAKE_START_Y = 15
+SNAKE_START_LENGTH = 3
+OBSTACLE_START_AREA_MIN_X = 16
+OBSTACLE_START_AREA_MAX_X = 20
+OBSTACLE_START_AREA_MIN_Y = 13
+OBSTACLE_START_AREA_MAX_Y = 17
+
+# ===== POWERUP CONSTANTS =====
+POWERUP_SELECTION_INTERVAL = 3  # every N apples
+POWERUP_SELECTION_COUNT = 3  # 3 choices per selection
+
+# ===== COLORS (R, G, B) =====
 BLACK = (0, 0, 0)
 DARK_GRAY = (20, 20, 20)
 GREEN = (0, 255, 0)
@@ -29,29 +64,38 @@ PURPLE = (128, 0, 255)
 OBSTACLE_LIGHT = (100, 100, 100)
 OBSTACLE_MID = (70, 70, 70)
 OBSTACLE_DARK = (40, 40, 40)
+GRID_LINE_COLOR = (30, 30, 30)
 
-# Button Colors
+# ===== BUTTON COLORS =====
 BUTTON_NORMAL = (0, 100, 0)  # Dark Green
 BUTTON_HOVER = (0, 150, 0)   # Brighter Green
 BUTTON_TEXT = (255, 255, 255)
 TITLE_COLOR = (0, 255, 0)
 
-# Directions
+# ===== DIRECTIONS =====
 UP = (0, -1)
 DOWN = (0, 1)
 LEFT = (-1, 0)
 RIGHT = (1, 0)
 
+# ===== DIRECTION UTILITIES =====
+OPPOSITE_DIRECTIONS = {UP: DOWN, DOWN: UP, LEFT: RIGHT, RIGHT: LEFT}
+
 
 class Snake:
     def __init__(self):
-        # Start at center (15, 15) with 3 segments moving right
-        self.body = [(15, 15), (14, 15), (13, 15)]
+        # Start at center with 3 segments moving right
+        self.body = [(SNAKE_START_X, SNAKE_START_Y), (SNAKE_START_X - 1, SNAKE_START_Y), (SNAKE_START_X - 2, SNAKE_START_Y)]
         self.direction = RIGHT
         self.grow_pending = False
         self.interpolation = 0.0  # 0.0 to 1.0 for smooth movement between cells
+        self.direction_queue = []  # Queue for buffering rapid input changes
     
     def move(self):
+        # Consume next direction from queue if available
+        if self.direction_queue:
+            self.direction = self.direction_queue.pop(0)
+        
         head_x, head_y = self.body[0]
         dir_x, dir_y = self.direction
         new_head = (head_x + dir_x, head_y + dir_y)
@@ -79,9 +123,14 @@ class Snake:
     
     def change_direction(self, new_direction):
         # Prevent 180-degree turns
-        opposite = {UP: DOWN, DOWN: UP, LEFT: RIGHT, RIGHT: LEFT}
-        if new_direction != opposite[self.direction]:
-            self.direction = new_direction
+        # Determine what direction to compare against
+        compare_direction = self.direction_queue[-1] if self.direction_queue else self.direction
+        
+        # Validate: prevent 180-degree reversal and duplicate consecutive directions
+        if new_direction != OPPOSITE_DIRECTIONS[compare_direction] and new_direction != compare_direction:
+            # Limit queue size to 1 buffered input for responsive classic snake feel
+            if len(self.direction_queue) < 1:
+                self.direction_queue.append(new_direction)
     
     def check_self_collision(self):
         return self.body[0] in self.body[1:]
@@ -125,13 +174,13 @@ class Food:
         self.position = (0, 0)
         self.pulse = 0
     
-    def spawn(self, snake_body):
-        # Keep generating random positions until we find one not on the snake
+    def spawn(self, snake_body_and_obstacles):
+        # Keep generating random positions until we find one not on the snake or obstacles
         while True:
             x = random.randint(0, GRID_SIZE - 1)
             y = random.randint(0, GRID_SIZE - 1)
             position = (x, y)
-            if position not in snake_body:
+            if position not in snake_body_and_obstacles:
                 self.position = position
                 break
     
@@ -169,13 +218,16 @@ class Particle:
         age = pygame.time.get_ticks() - self.created_time
         progress = age / self.lifetime
         # Fade alpha and size as particle ages
-        alpha = int(255 * (1 - progress))
-        radius = int(5 * (1 - progress * 0.5))  # Shrink to 50% of original size
+        alpha = max(0, min(255, int(255 * (1 - progress))))  # Clamp to valid range
+        radius = max(1, int(5 * (1 - progress * 0.5)))  # Ensure radius is at least 1
         
-        if radius > 0:
+        if radius > 0 and alpha > 0:
             # Draw circle with fade effect using per-pixel alpha
             surface = pygame.Surface((radius*2, radius*2), pygame.SRCALPHA)
-            pygame.draw.circle(surface, (*self.color, alpha), (radius, radius), radius)
+            # Handle both RGB and RGBA colors - ensure all values are integers
+            color_rgb = (int(self.color[0]), int(self.color[1]), int(self.color[2]))
+            color_with_alpha = (color_rgb[0], color_rgb[1], color_rgb[2], alpha)
+            pygame.draw.circle(surface, color_with_alpha, (radius, radius), radius)
             screen.blit(surface, (self.x - radius, self.y - radius))
 
 
@@ -215,13 +267,13 @@ class Obstacle:
                     shape_positions.append((x + dx, y + dy))
             
             # Check if all positions are free and not too close to snake start
-            # Snake starts at (15,15) moving right, so avoid x: 16-20, y: 13-17
             valid = True
             for pos in shape_positions:
                 px, py = pos
                 # Check general proximity and path in front of snake
-                in_start_path = (16 <= px <= 20 and 13 <= py <= 17)
-                too_close = abs(px - 15) + abs(py - 15) <= 3
+                in_start_path = (OBSTACLE_START_AREA_MIN_X <= px <= OBSTACLE_START_AREA_MAX_X and 
+                                OBSTACLE_START_AREA_MIN_Y <= py <= OBSTACLE_START_AREA_MAX_Y)
+                too_close = abs(px - SNAKE_START_X) + abs(py - SNAKE_START_Y) <= 3
                 
                 if (pos in snake_body or 
                     pos == food_position or 
@@ -387,260 +439,341 @@ class Powerup:
         return max(0, remaining_ms / 1000)
 
 
+class FontManager:
+    """Manages cached font objects for performance"""
+    def __init__(self):
+        self.fonts = {}
+    
+    def get_font(self, size):
+        """Get or create a font of the specified size"""
+        if size not in self.fonts:
+            self.fonts[size] = pygame.font.Font(None, size)
+        return self.fonts[size]
+
+
+class GameState:
+    """Encapsulates all game state variables"""
+    def __init__(self):
+        # Game flow states
+        self.title_screen_active = True
+        self.game_running = False
+        self.game_over = False
+        self.running = True
+        
+        # Game objects
+        self.snake = Snake()
+        self.food = Food()
+        self.score_manager = HighScoreManager()
+        self.obstacle = Obstacle()
+        
+        # Scoring and timing
+        self.score = 0
+        self.elapsed_time = 0
+        self.start_time = 0
+        self.last_move_time = 0
+        
+        # Input and UI
+        self.selected_button = 0  # 0 for Start, 1 for Quit
+        self.death_reason = ""
+        
+        # Game mechanics
+        self.particles = []
+        self.active_powerups = []
+        self.apples_collected = 0
+        
+        # Animation states
+        self.countdown_active = True
+        self.countdown_start_time = 0
+        self.powerup_selection_active = False
+        self.powerup_choices = []
+        self.selected_powerup_index = 0
+        self.death_animation_active = False
+        self.death_animation_start = 0
+        self.death_focal_point = (0, 0)
+        
+        # Visual effects
+        self.screen_shake_intensity = 0.0
+        self.screen_shake_time = 0
+        self.score_flash_time = 0
+        self.screen_flash_time = 0
+        self.shield_text_active = False
+        self.shield_text_time = 0
+    
+    def reset_game(self, current_time):
+        """Reset game state for a new game"""
+        self.snake = Snake()
+        self.obstacle.generate(15, self.snake.body, self.food.position)
+        self.food.spawn(self.snake.body + self.obstacle.positions)
+        self.score = 0
+        self.elapsed_time = 0
+        self.last_move_time = current_time
+        self.countdown_active = True
+        self.countdown_start_time = current_time
+        self.particles = []
+        self.screen_shake_intensity = 0
+        self.screen_shake_time = 0
+        self.score_flash_time = 0
+        self.screen_flash_time = 0
+        self.apples_collected = 0
+        self.active_powerups = []
+        self.powerup_selection_active = False
+        self.powerup_choices = []
+        self.selected_powerup_index = 0
+        self.death_reason = ""
+        self.death_animation_active = False
+        self.shield_text_active = False
+
+
 def main():
     # Initialize Pygame
     pygame.init()
     screen = pygame.display.set_mode((WIDTH, HEIGHT))
     pygame.display.set_caption('Snake Survivor')
     clock = pygame.time.Clock()
-    font = pygame.font.Font(None, 36)
-    title_font = pygame.font.Font(None, 90)
-    button_font = pygame.font.Font(None, 50)
-
-    # Game states
-    title_screen_active = True
-    game_running = False
-    game_over = False
+    
+    # Initialize font manager for performance
+    font_manager = FontManager()
+    
+    # Create game state
+    state = GameState()
+    state.start_time = pygame.time.get_ticks()
+    state.last_move_time = state.start_time
+    state.countdown_start_time = state.start_time
     
     # Title screen button setup
     start_button_rect = pygame.Rect(WIDTH // 2 - 100, HEIGHT // 2, 200, 50)
     quit_button_rect = pygame.Rect(WIDTH // 2 - 100, HEIGHT // 2 + 70, 200, 50)
-    selected_button = 0  # 0 for Start, 1 for Quit
-
-    # Timer
-    start_time = 0
-    elapsed_time = 0
     
-    # Initialize game objects
-    snake = Snake()
-    food = Food()
-    score_manager = HighScoreManager()
-    obstacle = Obstacle()
-    
-    # Game state
-    score = 0
-    death_reason = ""  # Track why player died (wall/obstacle/self)
-    running = True
-    last_move_time = pygame.time.get_ticks()
-    particles = []
-    
-    # Hype effects
-    screen_shake_intensity = 0
-    screen_shake_time = 0
-    score_flash_time = 0
-    screen_flash_time = 0
-    
-    # Powerup system
-    apples_collected = 0
-    active_powerups = []  # List of active Powerup objects
-    powerup_selection_active = False
-    powerup_choices = []  # 3 random powerup types to choose from
-    selected_powerup_index = 0  # For keyboard navigation
-    
-    # Countdown state
-    countdown_active = True
-    countdown_start_time = pygame.time.get_ticks()
-    countdown_duration = 3000  # 3 seconds (3, 2, 1)
-    go_duration = 500  # "GO!" shows for 0.5 seconds
-    
-    while running:
+    while state.running:
         current_time = pygame.time.get_ticks()
         mouse_pos = pygame.mouse.get_pos()
 
         # Event handling
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
-                running = False
+                state.running = False
 
-            if title_screen_active:
+            if state.title_screen_active:
                 if event.type == pygame.KEYDOWN:
                     if event.key == pygame.K_UP:
-                        selected_button = (selected_button - 1) % 2
+                        state.selected_button = (state.selected_button - 1) % 2
                     elif event.key == pygame.K_DOWN:
-                        selected_button = (selected_button + 1) % 2
+                        state.selected_button = (state.selected_button + 1) % 2
                     elif event.key == pygame.K_RETURN:
-                        if selected_button == 0:  # Start Game
-                            title_screen_active = False
-                            game_running = True
-                            start_time = current_time
-                            # Initialize game components
-                            snake = Snake()
-                            food.spawn(snake.body)
-                            obstacle.generate(15, snake.body, food.position)
-                            score = 0
-                            last_move_time = current_time
-                            countdown_active = True
-                            countdown_start_time = current_time
+                        if state.selected_button == 0:  # Start Game
+                            state.title_screen_active = False
+                            state.game_running = True
+                            state.start_time = current_time
+                            state.reset_game(current_time)
                         else:  # Quit Game
-                            running = False
+                            state.running = False
                 elif event.type == pygame.MOUSEBUTTONDOWN:
                     if start_button_rect.collidepoint(mouse_pos):
-                        title_screen_active = False
-                        game_running = True
-                        start_time = current_time
-                        # Initialize game components
-                        snake = Snake()
-                        food.spawn(snake.body)
-                        obstacle.generate(15, snake.body, food.position)
-                        score = 0
-                        last_move_time = current_time
-                        countdown_active = True
-                        countdown_start_time = current_time
+                        state.title_screen_active = False
+                        state.game_running = True
+                        state.start_time = current_time
+                        state.reset_game(current_time)
                     elif quit_button_rect.collidepoint(mouse_pos):
-                        running = False
+                        state.running = False
             
-            elif game_running:
+            elif state.game_running:
                 if event.type == pygame.KEYDOWN:
-                    if game_over:
+                    if state.game_over:
                         if event.key == pygame.K_SPACE:
-                            # Restart game
-                            snake = Snake()
-                            food.spawn(snake.body)
-                            obstacle.generate(15, snake.body, food.position)
-                            score = 0
-                            game_over = False
-                            countdown_active = True
-                            countdown_start_time = pygame.time.get_ticks()
-                            last_move_time = pygame.time.get_ticks()
-                            particles = []
-                            screen_shake_intensity = 0
-                            screen_shake_time = 0
-                            score_flash_time = 0
-                            screen_flash_time = 0
-                            apples_collected = 0
-                            active_powerups = []
-                            powerup_selection_active = False
-                            powerup_choices = []
-                            selected_powerup_index = 0
-                            death_reason = ""
+                            state.game_over = False
+                            state.reset_game(current_time)
                     else:
                         # Mode-specific input capture:
-                        # While powerup selection overlay is active, DO NOT change snake direction.
-                        if powerup_selection_active:
+                        if state.powerup_selection_active:
                             if event.key == pygame.K_LEFT:
-                                selected_powerup_index = (selected_powerup_index - 1) % 3
+                                state.selected_powerup_index = (state.selected_powerup_index - 1) % POWERUP_SELECTION_COUNT
                             elif event.key == pygame.K_RIGHT:
-                                selected_powerup_index = (selected_powerup_index + 1) % 3
+                                state.selected_powerup_index = (state.selected_powerup_index + 1) % POWERUP_SELECTION_COUNT
                             elif event.key == pygame.K_RETURN or event.key == pygame.K_SPACE:
-                                chosen_type = powerup_choices[selected_powerup_index]
+                                chosen_type = state.powerup_choices[state.selected_powerup_index]
                                 new_powerup = Powerup(chosen_type)
-                                new_powerup.activate(pygame.time.get_ticks())
-                                active_powerups.append(new_powerup)
-                                powerup_selection_active = False
-                                powerup_choices = []
-                                selected_powerup_index = 0
+                                new_powerup.activate(current_time)
+                                state.active_powerups.append(new_powerup)
+                                state.powerup_selection_active = False
+                                state.powerup_choices = []
+                                state.selected_powerup_index = 0
                         else:
                             # Handle direction changes (playing/countdown)
                             if event.key == pygame.K_UP:
-                                snake.change_direction(UP)
+                                state.snake.change_direction(UP)
                             elif event.key == pygame.K_DOWN:
-                                snake.change_direction(DOWN)
+                                state.snake.change_direction(DOWN)
                             elif event.key == pygame.K_LEFT:
-                                snake.change_direction(LEFT)
+                                state.snake.change_direction(LEFT)
                             elif event.key == pygame.K_RIGHT:
-                                snake.change_direction(RIGHT)
+                                state.snake.change_direction(RIGHT)
         
         # Drawing
         screen.fill(BLACK)
 
-        if title_screen_active:
+        if state.title_screen_active:
             # Draw title
+            title_font = font_manager.get_font(90)
+            button_font = font_manager.get_font(50)
+            
             title_text = title_font.render('Snake Survivor', True, TITLE_COLOR)
             title_rect = title_text.get_rect(center=(WIDTH // 2, HEIGHT // 2 - 100))
             screen.blit(title_text, title_rect)
 
             # Draw buttons
             # Start Button
-            start_color = BUTTON_HOVER if start_button_rect.collidepoint(mouse_pos) or selected_button == 0 else BUTTON_NORMAL
+            start_color = BUTTON_HOVER if start_button_rect.collidepoint(mouse_pos) or state.selected_button == 0 else BUTTON_NORMAL
             pygame.draw.rect(screen, start_color, start_button_rect, border_radius=10)
             start_text = button_font.render('Start Game', True, BUTTON_TEXT)
             start_text_rect = start_text.get_rect(center=start_button_rect.center)
             screen.blit(start_text, start_text_rect)
 
             # Quit Button
-            quit_color = BUTTON_HOVER if quit_button_rect.collidepoint(mouse_pos) or selected_button == 1 else BUTTON_NORMAL
+            quit_color = BUTTON_HOVER if quit_button_rect.collidepoint(mouse_pos) or state.selected_button == 1 else BUTTON_NORMAL
             pygame.draw.rect(screen, quit_color, quit_button_rect, border_radius=10)
             quit_text = button_font.render('Quit Game', True, BUTTON_TEXT)
             quit_text_rect = quit_text.get_rect(center=quit_button_rect.center)
             screen.blit(quit_text, quit_text_rect)
 
-        elif game_running:
-            if not game_over:
-                elapsed_time = (current_time - start_time) / 1000
+        elif state.game_running:
+            if not state.game_over:
+                state.elapsed_time = (current_time - state.start_time) / 1000
             
             # Handle countdown timer
-            if countdown_active:
-                time_since_countdown = current_time - countdown_start_time
-                if time_since_countdown >= countdown_duration + go_duration:
-                    countdown_active = False
-                    last_move_time = current_time  # Reset move timer after countdown
+            if state.countdown_active:
+                time_since_countdown = current_time - state.countdown_start_time
+                if time_since_countdown >= COUNTDOWN_DURATION + GO_DURATION:
+                    state.countdown_active = False
+                    state.last_move_time = current_time  # Reset move timer after countdown
             
             # Move snake based on timer, not frame rate (only if countdown finished)
-            time_since_move = current_time - last_move_time
+            time_since_move = current_time - state.last_move_time
             
             # Apply speed boost if active
             current_move_delay = MOVE_DELAY
-            for powerup in active_powerups:
+            for powerup in state.active_powerups:
                 if powerup.type == Powerup.SPEED_BOOST and powerup.active:
                     current_move_delay = int(MOVE_DELAY * 0.5)  # 50% faster
             
-            if not countdown_active and not powerup_selection_active and time_since_move >= current_move_delay:
+            if not state.countdown_active and not state.powerup_selection_active and not state.death_animation_active and time_since_move >= current_move_delay:
                 # Check if ghost mode is active (allows passing through self)
-                ghost_mode_active = any(p.type == Powerup.GHOST_MODE and p.active for p in active_powerups)
+                ghost_mode_active = any(p.type == Powerup.GHOST_MODE and p.active for p in state.active_powerups)
                 
-                move_result = snake.move()
+                # Predict next head position before moving
+                head_x, head_y = state.snake.body[0]
+                next_dir = state.snake.direction_queue[0] if state.snake.direction_queue else state.snake.direction
+                next_head = (head_x + next_dir[0], head_y + next_dir[1])
+                
                 collision_detected = False
                 collision_type = None  # 'wall', 'obstacle', or 'self'
                 
-                if not move_result:
+                # Check for wall collision
+                if next_head[0] < 0 or next_head[0] >= GRID_SIZE or next_head[1] < 0 or next_head[1] >= GRID_SIZE:
                     collision_detected = True
                     collision_type = 'wall'
-                elif obstacle.check_collision(snake.body[0]):
+                # Check for obstacle collision before moving
+                elif state.obstacle.check_collision(next_head):
                     collision_detected = True
                     collision_type = 'obstacle'
-                elif not ghost_mode_active and snake.check_self_collision():
+                # Check for self-collision on the predicted next position BEFORE moving
+                # Exclude tail since it will move away during the move
+                elif not ghost_mode_active and next_head in state.snake.body[:-1]:
                     collision_detected = True
                     collision_type = 'self'
                 
+                # Check if shield is active BEFORE moving
+                shield_active = False
+                for powerup in state.active_powerups:
+                    if powerup.type == Powerup.SHIELD and powerup.active:
+                        shield_active = True
+                        break
+                
+                # Only move if no collision detected, OR if shield will protect us from wall/obstacle
+                if not collision_detected or (shield_active and collision_type in ['wall', 'obstacle']):
+                    move_result = state.snake.move()
+                
                 if collision_detected:
-                    # Check if shield is active
-                    shield_active = False
-                    for powerup in active_powerups:
-                        if powerup.type == Powerup.SHIELD and powerup.active:
-                            shield_active = True
-                            powerup.active = False  # Shield breaks
-                            # Create shield break effect
-                            head_x, head_y = snake.body[0]
-                            head_pixel_x = head_x * CELL_SIZE + CELL_SIZE // 2
-                            head_pixel_y = head_y * CELL_SIZE + CELL_SIZE // 2
-                            for i in range(16):
-                                angle = (i / 16) * 2 * math.pi
-                                speed = 3 + random.uniform(0, 2)
-                                vx = math.cos(angle) * speed
-                                vy = math.sin(angle) * speed
-                                particles.append(Particle(head_pixel_x, head_pixel_y, vx, vy, CYAN))
-                            screen_shake_intensity = 10
-                            screen_shake_time = current_time
-                            break
-                    
-                    if not shield_active:
-                        game_over = True
-                        score_manager.update(score)
+                    if shield_active:
+                        # Shield is active, break it and continue game
+                        for powerup in state.active_powerups:
+                            if powerup.type == Powerup.SHIELD and powerup.active:
+                                powerup.active = False  # Shield breaks
+                                # Create shield break effect
+                                head_x, head_y = state.snake.body[0]
+                                head_pixel_x = head_x * CELL_SIZE + CELL_SIZE // 2
+                                head_pixel_y = head_y * CELL_SIZE + CELL_SIZE // 2
+                                for i in range(16):
+                                    angle = (i / 16) * 2 * math.pi
+                                    speed = 3 + random.uniform(0, 2)
+                                    vx = math.cos(angle) * speed
+                                    vy = math.sin(angle) * speed
+                                    state.particles.append(Particle(head_pixel_x, head_pixel_y, vx, vy, CYAN))
+                                state.screen_shake_intensity = 10
+                                state.screen_shake_time = current_time
+                                # Trigger shield text effect
+                                state.shield_text_active = True
+                                state.shield_text_time = current_time
+                                break
+                        # Shield absorbed the collision, continue game normally
+                        collision_detected = False
+                    else:
+                        # Trigger death animation instead of immediate game over
+                        state.death_animation_active = True
+                        state.death_animation_start = current_time
+                        state.particles.clear()  # Clear any existing particles before creating new ones
+                        
+                        # Get snake head position for zoom focal point
+                        head_x, head_y = state.snake.body[0]
+                        head_pixel_x = head_x * CELL_SIZE + CELL_SIZE // 2
+                        head_pixel_y = head_y * CELL_SIZE + CELL_SIZE // 2
+                        state.death_focal_point = (head_pixel_x, head_pixel_y)
+                        state.death_collision_type = collision_type
+                        
+                        # Create dramatic collision particle explosion
+                        particle_count = 40  # More particles for drama
+                        particle_colors = [RED, ORANGE, YELLOW, WHITE]
+                        
+                        # Ring of fast particles
+                        for i in range(particle_count):
+                            angle = (i / particle_count) * 2 * math.pi
+                            speed = 4 + random.uniform(0, 3)
+                            vx = math.cos(angle) * speed
+                            vy = math.sin(angle) * speed
+                            color = random.choice(particle_colors)
+                            state.particles.append(Particle(head_pixel_x, head_pixel_y, vx, vy, color))
+                        
+                        # Extra burst of slow particles for depth
+                        for i in range(20):
+                            angle = random.uniform(0, 2 * math.pi)
+                            speed = 1 + random.uniform(0, 2)
+                            vx = math.cos(angle) * speed
+                            vy = math.sin(angle) * speed
+                            state.particles.append(Particle(head_pixel_x, head_pixel_y, vx, vy, RED))
+                        
+                        # Massive screen shake
+                        state.screen_shake_intensity = 15
+                        state.screen_shake_time = current_time
+                        
+                        state.score_manager.update(state.score)
                         # Set death reason for Game Over screen
-                        if collision_type == 'wall' or collision_type == 'obstacle':
-                            death_reason = "You crashed into an obstacle!"
+                        if collision_type == 'wall':
+                            state.death_reason = "You hit the wall!"
+                        elif collision_type == 'obstacle':
+                            state.death_reason = "You crashed into an obstacle!"
                         elif collision_type == 'self':
-                            death_reason = "You ran into yourself!"
+                            state.death_reason = "You ran into yourself!"
+                        else:
+                            state.death_reason = "Game Over!"
                 else:
                     # Check food collision
-                    if snake.body[0] == food.get_position():
+                    if state.snake.body[0] == state.food.get_position():
                         # Spawn enhanced particle effect at food position
-                        food_pixel_x = food.position[0] * CELL_SIZE + CELL_SIZE // 2
-                        food_pixel_y = food.position[1] * CELL_SIZE + CELL_SIZE // 2
+                        food_pixel_x = state.food.position[0] * CELL_SIZE + CELL_SIZE // 2
+                        food_pixel_y = state.food.position[1] * CELL_SIZE + CELL_SIZE // 2
                         
                         # Check if double points is active
                         points_to_add = 10
-                        for powerup in active_powerups:
+                        for powerup in state.active_powerups:
                             if powerup.type == Powerup.DOUBLE_POINTS and powerup.active:
                                 points_to_add = 20
                                 powerup.remaining_uses -= 1
@@ -659,7 +792,7 @@ def main():
                                 color = YELLOW
                             else:
                                 color = RED if i % 3 != 0 else YELLOW
-                            particles.append(Particle(food_pixel_x, food_pixel_y, vx, vy, color))
+                            state.particles.append(Particle(food_pixel_x, food_pixel_y, vx, vy, color))
                         
                         # Extra fast particles for emphasis
                         for i in range(8):
@@ -667,119 +800,206 @@ def main():
                             speed = 4 + random.uniform(0, 2)
                             vx = math.cos(angle) * speed
                             vy = math.sin(angle) * speed
-                            particles.append(Particle(food_pixel_x, food_pixel_y, vx, vy, YELLOW))
+                            state.particles.append(Particle(food_pixel_x, food_pixel_y, vx, vy, YELLOW))
                         
                         # Trigger screen shake
-                        screen_shake_intensity = 8
-                        screen_shake_time = current_time
+                        state.screen_shake_intensity = 8
+                        state.screen_shake_time = current_time
                         
                         # Trigger score flash
-                        score_flash_time = current_time
+                        state.score_flash_time = current_time
                         
                         # Trigger screen flash
-                        screen_flash_time = current_time
+                        state.screen_flash_time = current_time
                         
-                        snake.grow()
-                        score += points_to_add
-                        food.spawn(snake.body + obstacle.positions)
-                        apples_collected += 1
+                        state.snake.grow()
+                        state.score += points_to_add
+                        state.food.spawn(state.snake.body + state.obstacle.positions)
+                        state.apples_collected += 1
                         
                         # Trigger powerup selection every 3 apples
-                        if apples_collected % 3 == 0 and not powerup_selection_active:
-                            powerup_selection_active = True
+                        if state.apples_collected % 3 == 0 and not state.powerup_selection_active:
+                            state.powerup_selection_active = True
                             # Generate 3 random powerup choices
                             all_types = [Powerup.SHIELD, Powerup.DOUBLE_POINTS, Powerup.GHOST_MODE, Powerup.SPEED_BOOST]
-                            powerup_choices = random.sample(all_types, 3)
-                            selected_powerup_index = 1  # Start with middle option selected
+                            state.powerup_choices = random.sample(all_types, 3)
+                            state.selected_powerup_index = 1  # Start with middle option selected
                 
                 # Reset interpolation after move
-                snake.interpolation = 0.0
-                last_move_time = current_time
+                state.snake.interpolation = 0.0
+                state.last_move_time = current_time
             
             # Clean up expired powerups
-            active_powerups = [p for p in active_powerups if not p.is_expired(current_time)]
+            state.active_powerups = [p for p in state.active_powerups if not p.is_expired(current_time)]
             
-            # Update screen shake
-            if screen_shake_intensity > 0:
-                time_since_shake = current_time - screen_shake_time
+            # Handle screen shake decay (runs during normal gameplay)
+            if state.screen_shake_intensity > 0:
+                time_since_shake = current_time - state.screen_shake_time
                 if time_since_shake > 300:  # Shake lasts 300ms
-                    screen_shake_intensity = 0
+                    state.screen_shake_intensity = 0
                 else:
                     # Decay shake intensity
-                    screen_shake_intensity = 8 * (1 - time_since_shake / 300)
+                    state.screen_shake_intensity = 8 * (1 - time_since_shake / 300)
+            
+            # Handle death animation
+            if state.death_animation_active:
+                death_time_elapsed = current_time - state.death_animation_start
+                if death_time_elapsed >= 2500:  # 2.5 seconds
+                    state.death_animation_active = False
+                    state.game_over = True
+                    state.particles.clear()  # Clear particles when game over, so they don't loop on the game over screen
         
             # Calculate screen shake offset
             shake_x = 0
             shake_y = 0
-            if screen_shake_intensity > 0:
-                shake_x = random.randint(-int(screen_shake_intensity), int(screen_shake_intensity))
-                shake_y = random.randint(-int(screen_shake_intensity), int(screen_shake_intensity))
+            if state.screen_shake_intensity > 0:
+                shake_x = random.randint(-int(state.screen_shake_intensity), int(state.screen_shake_intensity))
+                shake_y = random.randint(-int(state.screen_shake_intensity), int(state.screen_shake_intensity))
             
             # Drawing
-            # Draw panel background
-            panel_rect = pygame.Rect(GRID_WIDTH, 0, PANEL_WIDTH, HEIGHT)
-            pygame.draw.rect(screen, DARK_GRAY, panel_rect)
+            screen.fill(BLACK)
             
-            # Draw separator line between grid and panel
-            pygame.draw.line(screen, WHITE, (GRID_WIDTH, 0), (GRID_WIDTH, HEIGHT), 2)
+            # Handle death animation zoom effect
+            if state.death_animation_active:
+                death_time_elapsed = current_time - state.death_animation_start
+                
+                # Animation phases: 500ms freeze, 1500ms zoom (500-2000ms), 500ms hold+fade (2000-2500ms)
+                if death_time_elapsed < 500:
+                    zoom_scale = 1.0
+                elif death_time_elapsed < 2000:
+                    progress = (death_time_elapsed - 500) / 1500
+                    # Ease-in zoom curve
+                    zoom_scale = 1.0 + (progress ** 1.5) * 2.0  # 1.0x to 3.0x
+                else:
+                    zoom_scale = 3.0
+                
+                # Create zoom surface
+                zoom_surface = pygame.Surface((GRID_WIDTH, HEIGHT))
+                zoom_surface.fill(BLACK)
+                
+                # Calculate camera offset to center on death focal point
+                focal_x, focal_y = state.death_focal_point
+                camera_x = focal_x - GRID_WIDTH // 2
+                camera_y = focal_y - HEIGHT // 2
+                
+                # Draw grid
+                for x in range(0, GRID_WIDTH, CELL_SIZE):
+                    pygame.draw.line(zoom_surface, (30, 30, 30), (x, 0), (x, HEIGHT))
+                for y in range(0, HEIGHT, CELL_SIZE):
+                    pygame.draw.line(zoom_surface, (30, 30, 30), (0, y), (GRID_WIDTH, y))
+                
+                # Draw particles
+                for particle in state.particles:
+                    particle.draw(zoom_surface)
+                
+                # Draw obstacles
+                state.obstacle.draw(zoom_surface)
+                
+                # Draw food
+                state.food.draw(zoom_surface)
+                
+                # Draw snake (frozen)
+                state.snake.draw(zoom_surface)
+                
+                # Scale the surface
+                scaled_width = int(GRID_WIDTH * zoom_scale)
+                scaled_height = int(HEIGHT * zoom_scale)
+                scaled_surface = pygame.transform.scale(zoom_surface, (scaled_width, scaled_height))
+                
+                # Calculate blit position to center zoom on focal point
+                blit_x = -(camera_x * zoom_scale) + shake_x
+                blit_y = -(camera_y * zoom_scale) + shake_y
+                
+                # Blit scaled surface to screen (grid area only)
+                screen.blit(scaled_surface, (blit_x, blit_y))
+                
+                # Draw fade overlay in final phase
+                if death_time_elapsed >= 2000:
+                    fade_progress = (death_time_elapsed - 2000) / 500
+                    fade_alpha = int(fade_progress * 255)
+                    fade_surface = pygame.Surface((GRID_WIDTH, HEIGHT), pygame.SRCALPHA)
+                    fade_surface.fill((0, 0, 0, fade_alpha))
+                    screen.blit(fade_surface, (0, 0))
+                
+                # Draw panel normally
+                panel_rect = pygame.Rect(GRID_WIDTH, 0, PANEL_WIDTH, HEIGHT)
+                pygame.draw.rect(screen, DARK_GRAY, panel_rect)
+                pygame.draw.line(screen, WHITE, (GRID_WIDTH, 0), (GRID_WIDTH, HEIGHT), 2)
+            else:
+                # Normal rendering
+                # Draw panel background
+                panel_rect = pygame.Rect(GRID_WIDTH, 0, PANEL_WIDTH, HEIGHT)
+                pygame.draw.rect(screen, DARK_GRAY, panel_rect)
+                
+                # Draw separator line between grid and panel
+                pygame.draw.line(screen, WHITE, (GRID_WIDTH, 0), (GRID_WIDTH, HEIGHT), 2)
+                
+                # Draw background grid (with shake offset, only on grid area)
+                for x in range(0, GRID_WIDTH, CELL_SIZE):
+                    pygame.draw.line(screen, (30, 30, 30), (x + shake_x, shake_y), (x + shake_x, HEIGHT + shake_y))
+                for y in range(0, HEIGHT, CELL_SIZE):
+                    pygame.draw.line(screen, (30, 30, 30), (shake_x, y + shake_y), (GRID_WIDTH + shake_x, y + shake_y))
+                
+                # Update and draw particles (with shake offset)
+                state.particles = [p for p in state.particles if p.is_alive()]
+                for particle in state.particles:
+                    particle.update()
+                    # Temporarily offset particle position for shake
+                    original_x, original_y = particle.x, particle.y
+                    particle.x += shake_x
+                    particle.y += shake_y
+                    particle.draw(screen)
+                    particle.x, particle.y = original_x, original_y
+                
+                # Draw obstacles
+                state.obstacle.draw(screen)
+                
+                # Initialize font for panel UI
+                font = font_manager.get_font(36)
             
-            # Draw background grid (with shake offset, only on grid area)
-            for x in range(0, GRID_WIDTH, CELL_SIZE):
-                pygame.draw.line(screen, (30, 30, 30), (x + shake_x, shake_y), (x + shake_x, HEIGHT + shake_y))
-            for y in range(0, HEIGHT, CELL_SIZE):
-                pygame.draw.line(screen, (30, 30, 30), (shake_x, y + shake_y), (GRID_WIDTH + shake_x, y + shake_y))
+            # Update particles even during death animation
+            if state.death_animation_active:
+                state.particles = [p for p in state.particles if p.is_alive()]
+                for particle in state.particles:
+                    particle.update()
             
-            # Update and draw particles (with shake offset)
-            particles = [p for p in particles if p.is_alive()]
-            for particle in particles:
-                particle.update()
-                # Temporarily offset particle position for shake
-                original_x, original_y = particle.x, particle.y
-                particle.x += shake_x
-                particle.y += shake_y
-                particle.draw(screen)
-                particle.x, particle.y = original_x, original_y
-            
-            # Draw obstacles
-            obstacle.draw(screen)
-            
-            if not game_over:
+            if not state.game_over and not state.death_animation_active:
                 # Draw game elements
-                food.draw(screen)
-                snake.draw(screen)
+                state.food.draw(screen)
+                state.snake.draw(screen)
                 
                 # Draw score with zoom effect in panel
-                if score_flash_time > 0:
-                    time_since_flash = current_time - score_flash_time
+                if state.score_flash_time > 0:
+                    time_since_flash = current_time - state.score_flash_time
                     if time_since_flash < 300:  # Flash lasts 300ms
                         # Scale from 1.5 to 1.0
                         scale = 1.5 - (time_since_flash / 300) * 0.5
                         score_font_size = int(36 * scale)
                         score_font = pygame.font.Font(None, score_font_size)
-                        score_text = score_font.render(f'Score: {score}', True, YELLOW)
+                        score_text = score_font.render(f'Score: {state.score}', True, YELLOW)
                         score_rect = score_text.get_rect(center=(GRID_WIDTH + PANEL_WIDTH // 2, 30))
                         screen.blit(score_text, score_rect)
                     else:
-                        score_text = font.render(f'Score: {score}', True, WHITE)
+                        score_text = font.render(f'Score: {state.score}', True, WHITE)
                         score_rect = score_text.get_rect(center=(GRID_WIDTH + PANEL_WIDTH // 2, 30))
                         screen.blit(score_text, score_rect)
                 else:
-                    score_text = font.render(f'Score: {score}', True, WHITE)
+                    score_text = font.render(f'Score: {state.score}', True, WHITE)
                     score_rect = score_text.get_rect(center=(GRID_WIDTH + PANEL_WIDTH // 2, 30))
                     screen.blit(score_text, score_rect)
                 
                 # Draw high score in panel
-                high_score_text = font.render(f'High Score: {score_manager.get_high_score()}', True, WHITE)
+                high_score_text = font.render(f'High Score: {state.score_manager.get_high_score()}', True, WHITE)
                 high_score_rect = high_score_text.get_rect(center=(GRID_WIDTH + PANEL_WIDTH // 2, 70))
                 screen.blit(high_score_text, high_score_rect)
 
                 # Draw timer
-                timer_text = font.render(f'Time: {int(elapsed_time)}', True, WHITE)
+                timer_text = font.render(f'Time: {int(state.elapsed_time)}', True, WHITE)
                 timer_rect = timer_text.get_rect(center=(GRID_WIDTH + PANEL_WIDTH // 2, 110))
                 screen.blit(timer_text, timer_rect)
                 
                 # Draw active powerup indicators in panel
-                if active_powerups:
+                if state.active_powerups:
                     indicator_y = 160
                     indicator_font = pygame.font.Font(None, 22)
                     title_font = pygame.font.Font(None, 28)
@@ -789,7 +1009,7 @@ def main():
                     title_rect = title_text.get_rect(center=(GRID_WIDTH + PANEL_WIDTH // 2, 140))
                     screen.blit(title_text, title_rect)
                     
-                    for powerup in active_powerups:
+                    for powerup in state.active_powerups:
                         if powerup.active:
                             info = Powerup.INFO[powerup.type]
                             
@@ -823,16 +1043,37 @@ def main():
                         indicator_y += 70
                 
                 # Screen flash effect when collecting food (only on grid area)
-                if screen_flash_time > 0:
-                    time_since_flash = current_time - screen_flash_time
+                if state.screen_flash_time > 0:
+                    time_since_flash = current_time - state.screen_flash_time
                     if time_since_flash < 150:  # Flash lasts 150ms
                         flash_alpha = int(80 * (1 - time_since_flash / 150))
                         flash_surface = pygame.Surface((GRID_WIDTH, HEIGHT), pygame.SRCALPHA)
                         flash_surface.fill((255, 255, 255, flash_alpha))
                         screen.blit(flash_surface, (0, 0))
                 
+                # Draw shield used text (floating upward with fade)
+                if state.shield_text_active:
+                    time_since_shield = current_time - state.shield_text_time
+                    shield_text_duration = 1000  # 1 second
+                    if time_since_shield < shield_text_duration:
+                        # Calculate alpha fade (255 to 0)
+                        alpha = int(255 * (1 - time_since_shield / shield_text_duration))
+                        # Calculate upward offset (0 to -100 pixels)
+                        y_offset = -(time_since_shield / shield_text_duration) * 100
+                        
+                        # Create shield text with large font
+                        shield_font = pygame.font.Font(None, 60)
+                        shield_text = shield_font.render('SHIELD USED!', True, CYAN)
+                        shield_text.set_alpha(alpha)
+                        
+                        # Center on game grid
+                        shield_rect = shield_text.get_rect(center=(GRID_WIDTH // 2, HEIGHT // 2 + y_offset))
+                        screen.blit(shield_text, shield_rect)
+                    else:
+                        state.shield_text_active = False
+                
                 # Draw powerup selection screen (centered on grid)
-                if powerup_selection_active:
+                if state.powerup_selection_active:
                     # Semi-transparent overlay over grid only
                     overlay = pygame.Surface((GRID_WIDTH, HEIGHT), pygame.SRCALPHA)
                     overlay.fill((0, 0, 0, 180))
@@ -851,12 +1092,12 @@ def main():
                     start_x = (GRID_WIDTH - (card_width * 3 + card_spacing * 2)) // 2
                     card_y = 180
                     
-                    for i, powerup_type in enumerate(powerup_choices):
+                    for i, powerup_type in enumerate(state.powerup_choices):
                         card_x = start_x + i * (card_width + card_spacing)
                         info = Powerup.INFO[powerup_type]
                         
                         # Card background with selection highlight
-                        if i == selected_powerup_index:
+                        if i == state.selected_powerup_index:
                             # Animated scale for selected card
                             pulse = math.sin(current_time / 200) * 5
                             card_rect = pygame.Rect(card_x - pulse, card_y - pulse, 
@@ -896,8 +1137,8 @@ def main():
                             screen.blit(desc_text2, desc_rect2)
                 
                 # Draw countdown if active
-                if countdown_active:
-                    time_since_countdown = current_time - countdown_start_time
+                if state.countdown_active:
+                    time_since_countdown = current_time - state.countdown_start_time
                     
                     # Semi-transparent overlay
                     overlay = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
@@ -905,7 +1146,7 @@ def main():
                     screen.blit(overlay, (0, 0))
                     
                     # Determine countdown number or "GO!"
-                    if time_since_countdown < countdown_duration:
+                    if time_since_countdown < COUNTDOWN_DURATION:
                         countdown_value = 3 - int(time_since_countdown / 1000)
                         countdown_text = str(countdown_value)
                         color = WHITE
@@ -939,7 +1180,7 @@ def main():
                         base_font_size = 100
                         
                         # GO! explosion effect
-                        go_progress = (time_since_countdown - countdown_duration) / go_duration
+                        go_progress = (time_since_countdown - COUNTDOWN_DURATION) / GO_DURATION
                         
                         # Explosive zoom from 50% to 130% then settle to 120%
                         if go_progress < 0.5:
@@ -978,19 +1219,50 @@ def main():
                     
                     screen.blit(text_surface, text_rect)
             else:
-                # Game over screen
-                screen.fill(BLACK)
+                # Game over screen - show frozen death scene with full fade overlay
+                # Create the final frozen scene surface
+                frozen_surface = pygame.Surface((GRID_WIDTH, HEIGHT))
+                frozen_surface.fill(BLACK)
+                
+                # Draw grid
+                for x in range(0, GRID_WIDTH, CELL_SIZE):
+                    pygame.draw.line(frozen_surface, (30, 30, 30), (x, 0), (x, HEIGHT))
+                for y in range(0, HEIGHT, CELL_SIZE):
+                    pygame.draw.line(frozen_surface, (30, 30, 30), (0, y), (GRID_WIDTH, y))
+                
+                # Don't draw particles on game over screen - they should be cleared
+                
+                # Draw obstacles
+                state.obstacle.draw(frozen_surface)
+                
+                # Draw food
+                state.food.draw(frozen_surface)
+                
+                # Draw snake (frozen)
+                state.snake.draw(frozen_surface)
+                
+                # Blit frozen scene to screen
+                screen.blit(frozen_surface, (0, 0))
+                
+                # Dark fade overlay over the scene
+                fade_overlay = pygame.Surface((GRID_WIDTH, HEIGHT), pygame.SRCALPHA)
+                fade_overlay.fill((0, 0, 0, 200))  # Strong fade for readability
+                screen.blit(fade_overlay, (0, 0))
                 
                 # Draw panel background
                 panel_rect = pygame.Rect(GRID_WIDTH, 0, PANEL_WIDTH, HEIGHT)
                 pygame.draw.rect(screen, DARK_GRAY, panel_rect)
                 pygame.draw.line(screen, WHITE, (GRID_WIDTH, 0), (GRID_WIDTH, HEIGHT), 2)
                 
-                game_over_text = font.render('Game Over!', True, RED)
-                reason_text = font.render(death_reason, True, YELLOW)
-                score_text = font.render(f'Final Score: {score}', True, WHITE)
-                high_score_text = font.render(f'High Score: {score_manager.get_high_score()}', True, WHITE)
-                restart_text = font.render('Press SPACE to restart', True, WHITE)
+                # Initialize font for game over screen
+                game_over_font = font_manager.get_font(48)
+                text_font = font_manager.get_font(36)
+                
+                game_over_text = game_over_font.render('Game Over!', True, RED)
+                reason_text = text_font.render(state.death_reason, True, YELLOW)
+                score_text = text_font.render(f'Final Score: {state.score}', True, WHITE)
+                high_score_text = text_font.render(f'High Score: {state.score_manager.get_high_score()}', True, WHITE)
+                restart_text = text_font.render('Press SPACE to restart', True, WHITE)
                 
                 screen.blit(game_over_text, (GRID_WIDTH // 2 - game_over_text.get_width() // 2, HEIGHT // 2 - 80))
                 screen.blit(reason_text, (GRID_WIDTH // 2 - reason_text.get_width() // 2, HEIGHT // 2 - 40))

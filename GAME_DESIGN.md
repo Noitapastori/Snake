@@ -13,6 +13,7 @@ A classic Snake game implemented in Python using Pygame, enhanced with modern fe
 
 ### Controls
 - **Arrow Keys**: Change snake direction (Up, Down, Left, Right)
+  - *Note: Rapid inputs are queued - press multiple directions in quick succession to chain direction changes*
 - **Space Bar**: Restart game after game over
 - **Powerup Selection** (every 3 apples):
   - Left/Right Arrow Keys: Navigate powerup options
@@ -42,7 +43,11 @@ A classic Snake game implemented in Python using Pygame, enhanced with modern fe
 - **Rendering**: 30 FPS for smooth animations
 - **Movement Logic**: Timer-based (decoupled from frame rate)
 - **Growth**: Snake grows by 1 segment when food is consumed
-- **Direction Changes**: 180-degree turns are blocked to prevent instant self-collision
+- **Direction Changes**: 
+  - 180-degree turns are blocked to prevent instant self-collision
+  - **Input Queue System**: Rapid arrow key presses are buffered (max 1 input queued)
+  - Intermediate direction changes are executed sequentially, solving the "fast input collision" bug
+  - Prevents input loss when player taps arrows faster than move speed
 
 ### Food System
 - **Appearance**: Red rounded square (20x20 pixels) with pulsing animation
@@ -82,7 +87,7 @@ A classic Snake game implemented in Python using Pygame, enhanced with modern fe
 
 **Available Powerups:**
 
-1. **Shield** (Cyan)
+1. **Feedback: Screen shake (15 pixels, 300ms) + "SHIELD USED!" text floats upward with cyan color and fade-out (1 second)
    - Effect: Survive one collision (wall, obstacle, or self)
    - Duration: One-time use
    - Visual: Cyan particle explosion when shield breaks
@@ -215,10 +220,23 @@ When the player collects food, multiple simultaneous effects create a satisfying
 - Transitions to Game Over state on collision
 
 ### Game Over State
-- All movement stops
-- Displays end game information
-- High score is saved if current score exceeds it
-- Player can restart by pressing Space
+- **Death Animation** (2.5 seconds):
+  - **Phase 1 (0-500ms)**: Collision moment frozen with dramatic particle burst
+    - 40 fast particles in ring pattern (red, orange, yellow, white colors)
+    - 20 slow red particles for depth effect
+    - Massive screen shake (15 pixel intensity) creates impact
+  - **Phase 2 (500-2000ms)**: Smooth zoom from 1x to 3x scale (ease-in curve)
+    - Camera centers on snake head collision point
+    - All game elements (snake, obstacles, food, particles) scale and pan smoothly
+    - Creates cinematic "slow-motion replay" of collision
+  - **Phase 3 (2000-2500ms)**: Hold at 3x zoom + fade to black
+    - Black overlay gradually covers screen (500ms fade)
+    - Builds tension before showing game over screen
+- **Game Over Screen** (displays after animation):
+  - All movement stops
+  - Displays end game information
+  - High score is saved if current score exceeds it
+  - Player can restart by pressing Space
 
 ## Performance & Rendering
 
@@ -354,7 +372,26 @@ When the player collects food, multiple simultaneous effects create a satisfying
 
 ### Features
 - **Multiple Difficulty Levels**: Easy/Medium/Hard with different speeds
-- **Leaderboard**: Top 10 scores instead of single high score
+- **Leaderboard* - Recent Updates
+- **Fixed rapid input bug**: Implemented direction input queue system
+  - Prevents input loss when player taps arrow keys faster than game move speed
+  - Buffers up to 1 queued direction change for responsive classic snake feel
+  - Solves the "tapping arrows too fast causes false collisions" issue
+  
+- **Added shield usage feedback**: Visual indicator when shield is consumed
+  - Floating "SHIELD USED!" text in cyan color
+  - Floats upward from center of game grid with smooth fade-out (1 second duration)
+  - Combined with existing cyan particle burst and screen shake for dramatic effect
+  
+- **Implemented death camera animation**: Cinematic slow-motion zoom on collision
+  - 2.5 second total animation sequence
+  - Phase 1 (0-500ms): Dramatic particle explosion (40 fast + 20 slow particles in red/orange/yellow/white)
+  - Phase 2 (500-2000ms): Smooth 3x zoom centered on collision point with ease-in easing
+  - Phase 3 (2000-2500ms): Hold zoom + fade to black for dramatic effect
+  - Shows exact point of collision before transitioning to game over screen
+  - Massive screen shake (15 pixels) at collision moment for impact
+
+### January 2026 - Previous Updates*: Top 10 scores instead of single high score
 - **Statistics**: Games played, average score, total food eaten
 - **Customization**: User-selectable colors and themes
 - **Multiplayer**: Two-player mode with separate snakes
