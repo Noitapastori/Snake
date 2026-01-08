@@ -48,18 +48,32 @@ A modern, feature-rich take on the classic Snake game, built with Python and Pyg
 
 ## How to Play
 
-You can run the game in two ways:
-
-### From the Executable (Windows)
-If you have the `dist` folder, you can run the game directly without any installation.
-1.  Navigate into the `dist/snake_game` directory.
-2.  Double-click `snake_game.exe` to start the game.
-
-### From Source
-After following the installation steps, run the game from the project's root directory:
+Run the game from the project's root directory:
 ```bash
 python snake_game.py
 ```
+
+## Building the Executable
+
+You can create a standalone executable from the source code using PyInstaller.
+
+1.  **Ensure PyInstaller is installed:**
+    ```bash
+    pip install pyinstaller
+    ```
+
+2.  **Build the executable:**
+    Run PyInstaller from the project's root directory. You can use the provided `.spec` file for configuration:
+    ```bash
+    pyinstaller snake_game.spec
+    ```
+    Or, you can have PyInstaller generate a new spec file:
+    ```bash
+    pyinstaller snake_game.py --onefile --windowed
+    ```
+
+3.  **Run the executable:**
+    The executable will be located in the `dist` directory.
 
 ### Controls
 - **Arrow Keys**: Change the snake's direction.
