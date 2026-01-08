@@ -1,8 +1,8 @@
-gi# Snake Game - Game Design Document
+gi# Snake Survivor - Game Design Document
 
 ## Overview
 
-A classic Snake game implemented in Python using Pygame. The player controls a snake that grows longer as it consumes food, with the objective of achieving the highest score possible without colliding with walls or itself.
+A classic Snake game implemented in Python using Pygame, enhanced with modern features like power-ups, obstacles, and visual effects. The player controls a snake that grows longer as it consumes food, with the objective of achieving the highest score possible without colliding with walls, obstacles, or itself.
 
 ## Core Gameplay
 
@@ -31,7 +31,7 @@ A classic Snake game implemented in Python using Pygame. The player controls a s
 ### Grid System
 - **Grid Size**: 30x30 cells
 - **Cell Size**: 20x20 pixels
-- **Window Size**: 600x600 pixels
+- **Window Size**: 800x600 pixels (600x600 grid + 200px side panel)
 - **Coordinate System**: (0,0) at top-left, (29,29) at bottom-right
 
 ### Snake Mechanics
@@ -54,6 +54,12 @@ A classic Snake game implemented in Python using Pygame. The player controls a s
   - Screen shake (8 pixels, 300ms decay)
   - Screen flash (white, 150ms fade)
   - Score zoom animation (1.5x to 1.0x scale with yellow highlight)
+
+### Obstacle System
+- **Generation**: 15 obstacles are randomly generated at the start of each game.
+- **Appearance**: Rendered as gray, multi-cell blocks with a 3D effect.
+- **Placement**: Obstacles are placed randomly, avoiding the edges and the snake's initial path to ensure a fair start.
+- **Collision**: Colliding with an obstacle ends the game, unless the Shield power-up is active.
 
 ### Collision Detection
 - **Wall Collision**: Snake head moves outside grid bounds (x < 0, x >= 30, y < 0, y >= 30)
