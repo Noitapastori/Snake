@@ -9,6 +9,11 @@ __pycache__/
 *$py.class
 *.so
 
+# PyInstaller
+build/
+dist/
+*.spec
+
 # Game data
 high_score.json
 
