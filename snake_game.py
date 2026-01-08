@@ -30,6 +30,12 @@ OBSTACLE_LIGHT = (100, 100, 100)
 OBSTACLE_MID = (70, 70, 70)
 OBSTACLE_DARK = (40, 40, 40)
 
+# Button Colors
+BUTTON_NORMAL = (0, 100, 0)  # Dark Green
+BUTTON_HOVER = (0, 150, 0)   # Brighter Green
+BUTTON_TEXT = (255, 255, 255)
+TITLE_COLOR = (0, 255, 0)
+
 # Directions
 UP = (0, -1)
 DOWN = (0, 1)
@@ -385,21 +391,35 @@ def main():
     # Initialize Pygame
     pygame.init()
     screen = pygame.display.set_mode((WIDTH, HEIGHT))
-    pygame.display.set_caption('Snake Game')
+    pygame.display.set_caption('Snake Survivor')
     clock = pygame.time.Clock()
     font = pygame.font.Font(None, 36)
+    title_font = pygame.font.Font(None, 90)
+    button_font = pygame.font.Font(None, 50)
+
+    # Game states
+    title_screen_active = True
+    game_running = False
+    game_over = False
+    
+    # Title screen button setup
+    start_button_rect = pygame.Rect(WIDTH // 2 - 100, HEIGHT // 2, 200, 50)
+    quit_button_rect = pygame.Rect(WIDTH // 2 - 100, HEIGHT // 2 + 70, 200, 50)
+    selected_button = 0  # 0 for Start, 1 for Quit
+
+    # Timer
+    start_time = 0
+    elapsed_time = 0
     
     # Initialize game objects
     snake = Snake()
     food = Food()
-    food.spawn(snake.body)
     score_manager = HighScoreManager()
     obstacle = Obstacle()
-    obstacle.generate(15, snake.body, food.position)  # 15 obstacles for moderate difficulty
     
     # Game state
     score = 0
-    game_over = False
+    death_reason = ""  # Track why player died (wall/obstacle/self)
     running = True
     last_move_time = pygame.time.get_ticks()
     particles = []
@@ -424,61 +444,129 @@ def main():
     go_duration = 500  # "GO!" shows for 0.5 seconds
     
     while running:
+        current_time = pygame.time.get_ticks()
+        mouse_pos = pygame.mouse.get_pos()
+
         # Event handling
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 running = False
-            elif event.type == pygame.KEYDOWN:
-                if game_over:
-                    if event.key == pygame.K_SPACE:
-                        # Restart game
+
+            if title_screen_active:
+                if event.type == pygame.KEYDOWN:
+                    if event.key == pygame.K_UP:
+                        selected_button = (selected_button - 1) % 2
+                    elif event.key == pygame.K_DOWN:
+                        selected_button = (selected_button + 1) % 2
+                    elif event.key == pygame.K_RETURN:
+                        if selected_button == 0:  # Start Game
+                            title_screen_active = False
+                            game_running = True
+                            start_time = current_time
+                            # Initialize game components
+                            snake = Snake()
+                            food.spawn(snake.body)
+                            obstacle.generate(15, snake.body, food.position)
+                            score = 0
+                            last_move_time = current_time
+                            countdown_active = True
+                            countdown_start_time = current_time
+                        else:  # Quit Game
+                            running = False
+                elif event.type == pygame.MOUSEBUTTONDOWN:
+                    if start_button_rect.collidepoint(mouse_pos):
+                        title_screen_active = False
+                        game_running = True
+                        start_time = current_time
+                        # Initialize game components
                         snake = Snake()
                         food.spawn(snake.body)
                         obstacle.generate(15, snake.body, food.position)
                         score = 0
-                        game_over = False
+                        last_move_time = current_time
                         countdown_active = True
-                        countdown_start_time = pygame.time.get_ticks()
-                        last_move_time = pygame.time.get_ticks()
-                        particles = []
-                        screen_shake_intensity = 0
-                        screen_shake_time = 0
-                        score_flash_time = 0
-                        screen_flash_time = 0
-                        apples_collected = 0
-                        active_powerups = []
-                        powerup_selection_active = False
-                        powerup_choices = []
-                        selected_powerup_index = 0
-                else:
-                    # Handle direction changes
-                    if event.key == pygame.K_UP:
-                        snake.change_direction(UP)
-                    elif event.key == pygame.K_DOWN:
-                        snake.change_direction(DOWN)
-                    elif event.key == pygame.K_LEFT:
-                        snake.change_direction(LEFT)
-                    elif event.key == pygame.K_RIGHT:
-                        snake.change_direction(RIGHT)
-                    
-                    # Handle powerup selection
-                    if powerup_selection_active:
-                        if event.key == pygame.K_LEFT:
-                            selected_powerup_index = (selected_powerup_index - 1) % 3
-                        elif event.key == pygame.K_RIGHT:
-                            selected_powerup_index = (selected_powerup_index + 1) % 3
-                        elif event.key == pygame.K_RETURN or event.key == pygame.K_SPACE:
-                            # Activate selected powerup
-                            chosen_type = powerup_choices[selected_powerup_index]
-                            new_powerup = Powerup(chosen_type)
-                            new_powerup.activate(pygame.time.get_ticks())
-                            active_powerups.append(new_powerup)
+                        countdown_start_time = current_time
+                    elif quit_button_rect.collidepoint(mouse_pos):
+                        running = False
+            
+            elif game_running:
+                if event.type == pygame.KEYDOWN:
+                    if game_over:
+                        if event.key == pygame.K_SPACE:
+                            # Restart game
+                            snake = Snake()
+                            food.spawn(snake.body)
+                            obstacle.generate(15, snake.body, food.position)
+                            score = 0
+                            game_over = False
+                            countdown_active = True
+                            countdown_start_time = pygame.time.get_ticks()
+                            last_move_time = pygame.time.get_ticks()
+                            particles = []
+                            screen_shake_intensity = 0
+                            screen_shake_time = 0
+                            score_flash_time = 0
+                            screen_flash_time = 0
+                            apples_collected = 0
+                            active_powerups = []
                             powerup_selection_active = False
                             powerup_choices = []
                             selected_powerup_index = 0
+                            death_reason = ""
+                    else:
+                        # Mode-specific input capture:
+                        # While powerup selection overlay is active, DO NOT change snake direction.
+                        if powerup_selection_active:
+                            if event.key == pygame.K_LEFT:
+                                selected_powerup_index = (selected_powerup_index - 1) % 3
+                            elif event.key == pygame.K_RIGHT:
+                                selected_powerup_index = (selected_powerup_index + 1) % 3
+                            elif event.key == pygame.K_RETURN or event.key == pygame.K_SPACE:
+                                chosen_type = powerup_choices[selected_powerup_index]
+                                new_powerup = Powerup(chosen_type)
+                                new_powerup.activate(pygame.time.get_ticks())
+                                active_powerups.append(new_powerup)
+                                powerup_selection_active = False
+                                powerup_choices = []
+                                selected_powerup_index = 0
+                        else:
+                            # Handle direction changes (playing/countdown)
+                            if event.key == pygame.K_UP:
+                                snake.change_direction(UP)
+                            elif event.key == pygame.K_DOWN:
+                                snake.change_direction(DOWN)
+                            elif event.key == pygame.K_LEFT:
+                                snake.change_direction(LEFT)
+                            elif event.key == pygame.K_RIGHT:
+                                snake.change_direction(RIGHT)
         
-        if not game_over:
-            current_time = pygame.time.get_ticks()
+        # Drawing
+        screen.fill(BLACK)
+
+        if title_screen_active:
+            # Draw title
+            title_text = title_font.render('Snake Survivor', True, TITLE_COLOR)
+            title_rect = title_text.get_rect(center=(WIDTH // 2, HEIGHT // 2 - 100))
+            screen.blit(title_text, title_rect)
+
+            # Draw buttons
+            # Start Button
+            start_color = BUTTON_HOVER if start_button_rect.collidepoint(mouse_pos) or selected_button == 0 else BUTTON_NORMAL
+            pygame.draw.rect(screen, start_color, start_button_rect, border_radius=10)
+            start_text = button_font.render('Start Game', True, BUTTON_TEXT)
+            start_text_rect = start_text.get_rect(center=start_button_rect.center)
+            screen.blit(start_text, start_text_rect)
+
+            # Quit Button
+            quit_color = BUTTON_HOVER if quit_button_rect.collidepoint(mouse_pos) or selected_button == 1 else BUTTON_NORMAL
+            pygame.draw.rect(screen, quit_color, quit_button_rect, border_radius=10)
+            quit_text = button_font.render('Quit Game', True, BUTTON_TEXT)
+            quit_text_rect = quit_text.get_rect(center=quit_button_rect.center)
+            screen.blit(quit_text, quit_text_rect)
+
+        elif game_running:
+            if not game_over:
+                elapsed_time = (current_time - start_time) / 1000
             
             # Handle countdown timer
             if countdown_active:
@@ -502,13 +590,17 @@ def main():
                 
                 move_result = snake.move()
                 collision_detected = False
+                collision_type = None  # 'wall', 'obstacle', or 'self'
                 
                 if not move_result:
                     collision_detected = True
+                    collision_type = 'wall'
                 elif obstacle.check_collision(snake.body[0]):
                     collision_detected = True
+                    collision_type = 'obstacle'
                 elif not ghost_mode_active and snake.check_self_collision():
                     collision_detected = True
+                    collision_type = 'self'
                 
                 if collision_detected:
                     # Check if shield is active
@@ -534,6 +626,11 @@ def main():
                     if not shield_active:
                         game_over = True
                         score_manager.update(score)
+                        # Set death reason for Game Over screen
+                        if collision_type == 'wall' or collision_type == 'obstacle':
+                            death_reason = "You crashed into an obstacle!"
+                        elif collision_type == 'self':
+                            death_reason = "You ran into yourself!"
                 else:
                     # Check food collision
                     if snake.body[0] == food.get_position():
@@ -611,296 +708,295 @@ def main():
                     # Decay shake intensity
                     screen_shake_intensity = 8 * (1 - time_since_shake / 300)
         
-        # Calculate screen shake offset
-        shake_x = 0
-        shake_y = 0
-        if screen_shake_intensity > 0:
-            shake_x = random.randint(-int(screen_shake_intensity), int(screen_shake_intensity))
-            shake_y = random.randint(-int(screen_shake_intensity), int(screen_shake_intensity))
-        
-        # Drawing
-        screen.fill(BLACK)
-        
-        # Draw panel background
-        panel_rect = pygame.Rect(GRID_WIDTH, 0, PANEL_WIDTH, HEIGHT)
-        pygame.draw.rect(screen, DARK_GRAY, panel_rect)
-        
-        # Draw separator line between grid and panel
-        pygame.draw.line(screen, WHITE, (GRID_WIDTH, 0), (GRID_WIDTH, HEIGHT), 2)
-        
-        # Draw background grid (with shake offset, only on grid area)
-        for x in range(0, GRID_WIDTH, CELL_SIZE):
-            pygame.draw.line(screen, (30, 30, 30), (x + shake_x, shake_y), (x + shake_x, HEIGHT + shake_y))
-        for y in range(0, HEIGHT, CELL_SIZE):
-            pygame.draw.line(screen, (30, 30, 30), (shake_x, y + shake_y), (GRID_WIDTH + shake_x, y + shake_y))
-        
-        # Update and draw particles (with shake offset)
-        particles = [p for p in particles if p.is_alive()]
-        for particle in particles:
-            particle.update()
-            # Temporarily offset particle position for shake
-            original_x, original_y = particle.x, particle.y
-            particle.x += shake_x
-            particle.y += shake_y
-            particle.draw(screen)
-            particle.x, particle.y = original_x, original_y
-        
-        # Draw obstacles
-        obstacle.draw(screen)
-        
-        if not game_over:
-            # Draw game elements
-            food.draw(screen)
-            snake.draw(screen)
+            # Calculate screen shake offset
+            shake_x = 0
+            shake_y = 0
+            if screen_shake_intensity > 0:
+                shake_x = random.randint(-int(screen_shake_intensity), int(screen_shake_intensity))
+                shake_y = random.randint(-int(screen_shake_intensity), int(screen_shake_intensity))
             
-            # Draw score with zoom effect in panel
-            if score_flash_time > 0:
-                time_since_flash = current_time - score_flash_time
-                if time_since_flash < 300:  # Flash lasts 300ms
-                    # Scale from 1.5 to 1.0
-                    scale = 1.5 - (time_since_flash / 300) * 0.5
-                    score_font_size = int(36 * scale)
-                    score_font = pygame.font.Font(None, score_font_size)
-                    score_text = score_font.render(f'Score: {score}', True, YELLOW)
-                    score_rect = score_text.get_rect(center=(GRID_WIDTH + PANEL_WIDTH // 2, 30))
-                    screen.blit(score_text, score_rect)
+            # Drawing
+            # Draw panel background
+            panel_rect = pygame.Rect(GRID_WIDTH, 0, PANEL_WIDTH, HEIGHT)
+            pygame.draw.rect(screen, DARK_GRAY, panel_rect)
+            
+            # Draw separator line between grid and panel
+            pygame.draw.line(screen, WHITE, (GRID_WIDTH, 0), (GRID_WIDTH, HEIGHT), 2)
+            
+            # Draw background grid (with shake offset, only on grid area)
+            for x in range(0, GRID_WIDTH, CELL_SIZE):
+                pygame.draw.line(screen, (30, 30, 30), (x + shake_x, shake_y), (x + shake_x, HEIGHT + shake_y))
+            for y in range(0, HEIGHT, CELL_SIZE):
+                pygame.draw.line(screen, (30, 30, 30), (shake_x, y + shake_y), (GRID_WIDTH + shake_x, y + shake_y))
+            
+            # Update and draw particles (with shake offset)
+            particles = [p for p in particles if p.is_alive()]
+            for particle in particles:
+                particle.update()
+                # Temporarily offset particle position for shake
+                original_x, original_y = particle.x, particle.y
+                particle.x += shake_x
+                particle.y += shake_y
+                particle.draw(screen)
+                particle.x, particle.y = original_x, original_y
+            
+            # Draw obstacles
+            obstacle.draw(screen)
+            
+            if not game_over:
+                # Draw game elements
+                food.draw(screen)
+                snake.draw(screen)
+                
+                # Draw score with zoom effect in panel
+                if score_flash_time > 0:
+                    time_since_flash = current_time - score_flash_time
+                    if time_since_flash < 300:  # Flash lasts 300ms
+                        # Scale from 1.5 to 1.0
+                        scale = 1.5 - (time_since_flash / 300) * 0.5
+                        score_font_size = int(36 * scale)
+                        score_font = pygame.font.Font(None, score_font_size)
+                        score_text = score_font.render(f'Score: {score}', True, YELLOW)
+                        score_rect = score_text.get_rect(center=(GRID_WIDTH + PANEL_WIDTH // 2, 30))
+                        screen.blit(score_text, score_rect)
+                    else:
+                        score_text = font.render(f'Score: {score}', True, WHITE)
+                        score_rect = score_text.get_rect(center=(GRID_WIDTH + PANEL_WIDTH // 2, 30))
+                        screen.blit(score_text, score_rect)
                 else:
                     score_text = font.render(f'Score: {score}', True, WHITE)
                     score_rect = score_text.get_rect(center=(GRID_WIDTH + PANEL_WIDTH // 2, 30))
                     screen.blit(score_text, score_rect)
-            else:
-                score_text = font.render(f'Score: {score}', True, WHITE)
-                score_rect = score_text.get_rect(center=(GRID_WIDTH + PANEL_WIDTH // 2, 30))
-                screen.blit(score_text, score_rect)
-            
-            # Draw high score in panel
-            high_score_text = font.render(f'High Score: {score_manager.get_high_score()}', True, WHITE)
-            high_score_rect = high_score_text.get_rect(center=(GRID_WIDTH + PANEL_WIDTH // 2, 70))
-            screen.blit(high_score_text, high_score_rect)
-            
-            # Draw active powerup indicators in panel
-            if active_powerups:
-                indicator_y = 120
-                indicator_font = pygame.font.Font(None, 22)
-                title_font = pygame.font.Font(None, 28)
                 
-                # Draw "Active Powerups" title
-                title_text = title_font.render('Active Powerups', True, YELLOW)
-                title_rect = title_text.get_rect(center=(GRID_WIDTH + PANEL_WIDTH // 2, 100))
-                screen.blit(title_text, title_rect)
+                # Draw high score in panel
+                high_score_text = font.render(f'High Score: {score_manager.get_high_score()}', True, WHITE)
+                high_score_rect = high_score_text.get_rect(center=(GRID_WIDTH + PANEL_WIDTH // 2, 70))
+                screen.blit(high_score_text, high_score_rect)
+
+                # Draw timer
+                timer_text = font.render(f'Time: {int(elapsed_time)}', True, WHITE)
+                timer_rect = timer_text.get_rect(center=(GRID_WIDTH + PANEL_WIDTH // 2, 110))
+                screen.blit(timer_text, timer_rect)
                 
-                for powerup in active_powerups:
-                    if powerup.active:
-                        info = Powerup.INFO[powerup.type]
+                # Draw active powerup indicators in panel
+                if active_powerups:
+                    indicator_y = 160
+                    indicator_font = pygame.font.Font(None, 22)
+                    title_font = pygame.font.Font(None, 28)
+                    
+                    # Draw "Active Powerups" title
+                    title_text = title_font.render('Active Powerups', True, YELLOW)
+                    title_rect = title_text.get_rect(center=(GRID_WIDTH + PANEL_WIDTH // 2, 140))
+                    screen.blit(title_text, title_rect)
+                    
+                    for powerup in active_powerups:
+                        if powerup.active:
+                            info = Powerup.INFO[powerup.type]
+                            
+                            # Background bar (centered in panel)
+                            bar_width = 180
+                            bar_height = 60
+                            bar_x = GRID_WIDTH + (PANEL_WIDTH - bar_width) // 2
+                            bar_rect = pygame.Rect(bar_x, indicator_y, bar_width, bar_height)
+                            pygame.draw.rect(screen, info['color'], bar_rect, border_radius=8)
+                            pygame.draw.rect(screen, WHITE, bar_rect, 2, border_radius=8)
+                            
+                            # Icon (larger)
+                            icon_font = pygame.font.Font(None, 32)
+                            icon_text = icon_font.render(info['icon'], True, BLACK)
+                            icon_rect = icon_text.get_rect(center=(bar_x + 20, indicator_y + 20))
+                            screen.blit(icon_text, icon_rect)
+                            
+                            # Name
+                            name_text = indicator_font.render(info['name'], True, BLACK)
+                            screen.blit(name_text, (bar_x + 40, indicator_y + 8))
+                            
+                            # Timer or uses remaining
+                            if powerup.type == Powerup.DOUBLE_POINTS:
+                                remaining_text = indicator_font.render(f'{powerup.remaining_uses} apples left', True, BLACK)
+                                screen.blit(remaining_text, (bar_x + 40, indicator_y + 32))
+                            elif info['duration'] is not None:
+                                remaining_time = powerup.get_remaining_time(current_time)
+                                time_text = indicator_font.render(f'{remaining_time:.1f}s remaining', True, BLACK)
+                                screen.blit(time_text, (bar_x + 40, indicator_y + 32))
                         
-                        # Background bar (centered in panel)
-                        bar_width = 180
-                        bar_height = 60
-                        bar_x = GRID_WIDTH + (PANEL_WIDTH - bar_width) // 2
-                        bar_rect = pygame.Rect(bar_x, indicator_y, bar_width, bar_height)
-                        pygame.draw.rect(screen, info['color'], bar_rect, border_radius=8)
-                        pygame.draw.rect(screen, WHITE, bar_rect, 2, border_radius=8)
+                        indicator_y += 70
+                
+                # Screen flash effect when collecting food (only on grid area)
+                if screen_flash_time > 0:
+                    time_since_flash = current_time - screen_flash_time
+                    if time_since_flash < 150:  # Flash lasts 150ms
+                        flash_alpha = int(80 * (1 - time_since_flash / 150))
+                        flash_surface = pygame.Surface((GRID_WIDTH, HEIGHT), pygame.SRCALPHA)
+                        flash_surface.fill((255, 255, 255, flash_alpha))
+                        screen.blit(flash_surface, (0, 0))
+                
+                # Draw powerup selection screen (centered on grid)
+                if powerup_selection_active:
+                    # Semi-transparent overlay over grid only
+                    overlay = pygame.Surface((GRID_WIDTH, HEIGHT), pygame.SRCALPHA)
+                    overlay.fill((0, 0, 0, 180))
+                    screen.blit(overlay, (0, 0))
+                    
+                    # Title
+                    title_font = pygame.font.Font(None, 48)
+                    title_text = title_font.render('Choose a Powerup!', True, YELLOW)
+                    title_rect = title_text.get_rect(center=(GRID_WIDTH // 2, 80))
+                    screen.blit(title_text, title_rect)
+                    
+                    # Draw 3 powerup cards
+                    card_width = 150
+                    card_height = 200
+                    card_spacing = 30
+                    start_x = (GRID_WIDTH - (card_width * 3 + card_spacing * 2)) // 2
+                    card_y = 180
+                    
+                    for i, powerup_type in enumerate(powerup_choices):
+                        card_x = start_x + i * (card_width + card_spacing)
+                        info = Powerup.INFO[powerup_type]
                         
-                        # Icon (larger)
-                        icon_font = pygame.font.Font(None, 32)
+                        # Card background with selection highlight
+                        if i == selected_powerup_index:
+                            # Animated scale for selected card
+                            pulse = math.sin(current_time / 200) * 5
+                            card_rect = pygame.Rect(card_x - pulse, card_y - pulse, 
+                                                   card_width + pulse * 2, card_height + pulse * 2)
+                            pygame.draw.rect(screen, info['color'], card_rect, border_radius=10)
+                            pygame.draw.rect(screen, WHITE, card_rect, 4, border_radius=10)
+                        else:
+                            card_rect = pygame.Rect(card_x, card_y, card_width, card_height)
+                            pygame.draw.rect(screen, info['color'], card_rect, border_radius=10)
+                            pygame.draw.rect(screen, DARK_GRAY, card_rect, 2, border_radius=10)
+                        
+                        # Icon
+                        icon_font = pygame.font.Font(None, 60)
                         icon_text = icon_font.render(info['icon'], True, BLACK)
-                        icon_rect = icon_text.get_rect(center=(bar_x + 20, indicator_y + 20))
+                        icon_rect = icon_text.get_rect(center=(card_x + card_width // 2, card_y + 50))
                         screen.blit(icon_text, icon_rect)
                         
                         # Name
-                        name_text = indicator_font.render(info['name'], True, BLACK)
-                        screen.blit(name_text, (bar_x + 40, indicator_y + 8))
+                        name_font = pygame.font.Font(None, 32)
+                        name_text = name_font.render(info['name'], True, BLACK)
+                        name_rect = name_text.get_rect(center=(card_x + card_width // 2, card_y + 120))
+                        screen.blit(name_text, name_rect)
                         
-                        # Timer or uses remaining
-                        if powerup.type == Powerup.DOUBLE_POINTS:
-                            remaining_text = indicator_font.render(f'{powerup.remaining_uses} apples left', True, BLACK)
-                            screen.blit(remaining_text, (bar_x + 40, indicator_y + 32))
-                        elif info['duration'] is not None:
-                            remaining_time = powerup.get_remaining_time(current_time)
-                            time_text = indicator_font.render(f'{remaining_time:.1f}s remaining', True, BLACK)
-                            screen.blit(time_text, (bar_x + 40, indicator_y + 32))
+                        # Description (word wrap)
+                        desc_font = pygame.font.Font(None, 20)
+                        desc_lines = info['description'].split(' ')
+                        line1 = ' '.join(desc_lines[:3])
+                        line2 = ' '.join(desc_lines[3:]) if len(desc_lines) > 3 else ''
                         
-                        indicator_y += 70
-            
-            # Screen flash effect when collecting food (only on grid area)
-            if screen_flash_time > 0:
-                time_since_flash = current_time - screen_flash_time
-                if time_since_flash < 150:  # Flash lasts 150ms
-                    flash_alpha = int(80 * (1 - time_since_flash / 150))
-                    flash_surface = pygame.Surface((GRID_WIDTH, HEIGHT), pygame.SRCALPHA)
-                    flash_surface.fill((255, 255, 255, flash_alpha))
-                    screen.blit(flash_surface, (0, 0))
-            
-            # Draw powerup selection screen (centered on grid)
-            if powerup_selection_active:
-                # Semi-transparent overlay over grid only
-                overlay = pygame.Surface((GRID_WIDTH, HEIGHT), pygame.SRCALPHA)
-                overlay.fill((0, 0, 0, 180))
-                screen.blit(overlay, (0, 0))
+                        desc_text1 = desc_font.render(line1, True, BLACK)
+                        desc_rect1 = desc_text1.get_rect(center=(card_x + card_width // 2, card_y + 155))
+                        screen.blit(desc_text1, desc_rect1)
+                        
+                        if line2:
+                            desc_text2 = desc_font.render(line2, True, BLACK)
+                            desc_rect2 = desc_text2.get_rect(center=(card_x + card_width // 2, card_y + 175))
+                            screen.blit(desc_text2, desc_rect2)
                 
-                # Title
-                title_font = pygame.font.Font(None, 48)
-                title_text = title_font.render('Choose a Powerup!', True, YELLOW)
-                title_rect = title_text.get_rect(center=(GRID_WIDTH // 2, 80))
-                screen.blit(title_text, title_rect)
-                
-                # Draw 3 powerup cards
-                card_width = 150
-                card_height = 200
-                card_spacing = 30
-                start_x = (GRID_WIDTH - (card_width * 3 + card_spacing * 2)) // 2
-                card_y = 180
-                
-                for i, powerup_type in enumerate(powerup_choices):
-                    card_x = start_x + i * (card_width + card_spacing)
-                    info = Powerup.INFO[powerup_type]
+                # Draw countdown if active
+                if countdown_active:
+                    time_since_countdown = current_time - countdown_start_time
                     
-                    # Card background with selection highlight
-                    if i == selected_powerup_index:
-                        # Animated scale for selected card
-                        pulse = math.sin(current_time / 200) * 5
-                        card_rect = pygame.Rect(card_x - pulse, card_y - pulse, 
-                                               card_width + pulse * 2, card_height + pulse * 2)
-                        pygame.draw.rect(screen, info['color'], card_rect, border_radius=10)
-                        pygame.draw.rect(screen, WHITE, card_rect, 4, border_radius=10)
+                    # Semi-transparent overlay
+                    overlay = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
+                    overlay.fill((0, 0, 0, 150))  # Black with 150 alpha
+                    screen.blit(overlay, (0, 0))
+                    
+                    # Determine countdown number or "GO!"
+                    if time_since_countdown < countdown_duration:
+                        countdown_value = 3 - int(time_since_countdown / 1000)
+                        countdown_text = str(countdown_value)
+                        color = WHITE
+                        base_font_size = 120
+                        
+                        # Calculate progress within current second (0.0 to 1.0)
+                        progress_in_second = (time_since_countdown % 1000) / 1000.0
+                        
+                        # Zoom in effect: Start at 150% scale, zoom to 100%, then slight bounce
+                        if progress_in_second < 0.3:
+                            # Zoom in phase (0.3 seconds)
+                            scale = 1.5 - (progress_in_second / 0.3) * 0.5
+                        elif progress_in_second < 0.4:
+                            # Bounce phase (0.1 seconds)
+                            bounce_progress = (progress_in_second - 0.3) / 0.1
+                            scale = 1.0 - math.sin(bounce_progress * math.pi) * 0.1
+                        else:
+                            # Steady phase
+                            scale = 1.0
+                        
+                        # Slight rotation wobble during zoom
+                        if progress_in_second < 0.4:
+                            rotation_angle = math.sin(progress_in_second * math.pi * 5) * 5  # ±5 degrees
+                        else:
+                            rotation_angle = 0
+                        
+                        font_size = int(base_font_size * scale)
                     else:
-                        card_rect = pygame.Rect(card_x, card_y, card_width, card_height)
-                        pygame.draw.rect(screen, info['color'], card_rect, border_radius=10)
-                        pygame.draw.rect(screen, DARK_GRAY, card_rect, 2, border_radius=10)
+                        countdown_text = "GO!"
+                        color = GREEN
+                        base_font_size = 100
+                        
+                        # GO! explosion effect
+                        go_progress = (time_since_countdown - countdown_duration) / go_duration
+                        
+                        # Explosive zoom from 50% to 130% then settle to 120%
+                        if go_progress < 0.5:
+                            scale = 0.5 + (go_progress / 0.5) * 0.8  # 0.5 to 1.3
+                        else:
+                            scale = 1.3 - ((go_progress - 0.5) / 0.5) * 0.1  # 1.3 to 1.2
+                        
+                        # Rotation spin on GO!
+                        rotation_angle = go_progress * 360 * 0.5  # Half rotation
+                        
+                        font_size = int(base_font_size * scale)
                     
-                    # Icon
-                    icon_font = pygame.font.Font(None, 60)
-                    icon_text = icon_font.render(info['icon'], True, BLACK)
-                    icon_rect = icon_text.get_rect(center=(card_x + card_width // 2, card_y + 50))
-                    screen.blit(icon_text, icon_rect)
+                    # Create large font for countdown
+                    countdown_font = pygame.font.Font(None, font_size)
+                    text_surface = countdown_font.render(countdown_text, True, color)
                     
-                    # Name
-                    name_font = pygame.font.Font(None, 32)
-                    name_text = name_font.render(info['name'], True, BLACK)
-                    name_rect = name_text.get_rect(center=(card_x + card_width // 2, card_y + 120))
-                    screen.blit(name_text, name_rect)
-                    
-                    # Description (word wrap)
-                    desc_font = pygame.font.Font(None, 20)
-                    desc_lines = info['description'].split(' ')
-                    line1 = ' '.join(desc_lines[:3])
-                    line2 = ' '.join(desc_lines[3:]) if len(desc_lines) > 3 else ''
-                    
-                    desc_text1 = desc_font.render(line1, True, BLACK)
-                    desc_rect1 = desc_text1.get_rect(center=(card_x + card_width // 2, card_y + 155))
-                    screen.blit(desc_text1, desc_rect1)
-                    
-                    if line2:
-                        desc_text2 = desc_font.render(line2, True, BLACK)
-                        desc_rect2 = desc_text2.get_rect(center=(card_x + card_width // 2, card_y + 175))
-                        screen.blit(desc_text2, desc_rect2)
-                
-                # Instructions
-                instruction_font = pygame.font.Font(None, 28)
-                instruction_text = instruction_font.render('Arrow Keys: Select  |  Enter/Space: Choose', True, WHITE)
-                instruction_rect = instruction_text.get_rect(center=(WIDTH // 2, HEIGHT - 60))
-                screen.blit(instruction_text, instruction_rect)
-            
-            # Draw countdown if active
-            if countdown_active:
-                time_since_countdown = current_time - countdown_start_time
-                
-                # Semi-transparent overlay
-                overlay = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
-                overlay.fill((0, 0, 0, 150))  # Black with 150 alpha
-                screen.blit(overlay, (0, 0))
-                
-                # Determine countdown number or "GO!"
-                if time_since_countdown < countdown_duration:
-                    countdown_value = 3 - int(time_since_countdown / 1000)
-                    countdown_text = str(countdown_value)
-                    color = WHITE
-                    base_font_size = 120
-                    
-                    # Calculate progress within current second (0.0 to 1.0)
-                    progress_in_second = (time_since_countdown % 1000) / 1000.0
-                    
-                    # Zoom in effect: Start at 150% scale, zoom to 100%, then slight bounce
-                    if progress_in_second < 0.3:
-                        # Zoom in phase (0.3 seconds)
-                        scale = 1.5 - (progress_in_second / 0.3) * 0.5
-                    elif progress_in_second < 0.4:
-                        # Bounce phase (0.1 seconds)
-                        bounce_progress = (progress_in_second - 0.3) / 0.1
-                        scale = 1.0 - math.sin(bounce_progress * math.pi) * 0.1
-                    else:
-                        # Steady phase
-                        scale = 1.0
-                    
-                    # Slight rotation wobble during zoom
-                    if progress_in_second < 0.4:
-                        rotation_angle = math.sin(progress_in_second * math.pi * 5) * 5  # ±5 degrees
-                    else:
-                        rotation_angle = 0
-                    
-                    font_size = int(base_font_size * scale)
-                else:
-                    countdown_text = "GO!"
-                    color = GREEN
-                    base_font_size = 100
-                    
-                    # GO! explosion effect
-                    go_progress = (time_since_countdown - countdown_duration) / go_duration
-                    
-                    # Explosive zoom from 50% to 130% then settle to 120%
-                    if go_progress < 0.5:
-                        scale = 0.5 + (go_progress / 0.5) * 0.8  # 0.5 to 1.3
-                    else:
-                        scale = 1.3 - ((go_progress - 0.5) / 0.5) * 0.1  # 1.3 to 1.2
-                    
-                    # Rotation spin on GO!
-                    rotation_angle = go_progress * 360 * 0.5  # Half rotation
-                    
-                    font_size = int(base_font_size * scale)
-                
-                # Create large font for countdown
-                countdown_font = pygame.font.Font(None, font_size)
-                text_surface = countdown_font.render(countdown_text, True, color)
-                
-                # Apply rotation if needed
-                if abs(rotation_angle) > 0.1:
-                    text_surface = pygame.transform.rotate(text_surface, -rotation_angle)
-                
-                text_rect = text_surface.get_rect(center=(GRID_WIDTH // 2, HEIGHT // 2))
-                
-                # Add pulsing glow effect to countdown text
-                glow_font = pygame.font.Font(None, int(font_size * 1.1))
-                for offset in range(5, 0, -1):
-                    alpha = 50 - offset * 10
-                    glow_surface = glow_font.render(countdown_text, True, (*color[:3],))
-                    
-                    # Apply same rotation to glow
+                    # Apply rotation if needed
                     if abs(rotation_angle) > 0.1:
-                        glow_surface = pygame.transform.rotate(glow_surface, -rotation_angle)
+                        text_surface = pygame.transform.rotate(text_surface, -rotation_angle)
                     
-                    glow_surface.set_alpha(alpha)
-                    glow_rect = glow_surface.get_rect(center=(GRID_WIDTH // 2, HEIGHT // 2))
-                    screen.blit(glow_surface, glow_rect)
+                    text_rect = text_surface.get_rect(center=(GRID_WIDTH // 2, HEIGHT // 2))
+                    
+                    # Add pulsing glow effect to countdown text
+                    glow_font = pygame.font.Font(None, int(font_size * 1.1))
+                    for offset in range(5, 0, -1):
+                        alpha = 50 - offset * 10
+                        glow_surface = glow_font.render(countdown_text, True, (*color[:3],))
+                        
+                        # Apply same rotation to glow
+                        if abs(rotation_angle) > 0.1:
+                            glow_surface = pygame.transform.rotate(glow_surface, -rotation_angle)
+                        
+                        glow_surface.set_alpha(alpha)
+                        glow_rect = glow_surface.get_rect(center=(GRID_WIDTH // 2, HEIGHT // 2))
+                        screen.blit(glow_surface, glow_rect)
+                    
+                    screen.blit(text_surface, text_rect)
+            else:
+                # Game over screen
+                screen.fill(BLACK)
                 
-                screen.blit(text_surface, text_rect)
-        else:
-            # Game over screen
-            screen.fill(BLACK)
-            
-            # Draw panel background
-            panel_rect = pygame.Rect(GRID_WIDTH, 0, PANEL_WIDTH, HEIGHT)
-            pygame.draw.rect(screen, DARK_GRAY, panel_rect)
-            pygame.draw.line(screen, WHITE, (GRID_WIDTH, 0), (GRID_WIDTH, HEIGHT), 2)
-            
-            game_over_text = font.render('Game Over!', True, RED)
-            score_text = font.render(f'Final Score: {score}', True, WHITE)
-            high_score_text = font.render(f'High Score: {score_manager.get_high_score()}', True, WHITE)
-            restart_text = font.render('Press SPACE to restart', True, WHITE)
-            
-            screen.blit(game_over_text, (GRID_WIDTH // 2 - game_over_text.get_width() // 2, HEIGHT // 2 - 60))
-            screen.blit(score_text, (GRID_WIDTH // 2 - score_text.get_width() // 2, HEIGHT // 2 - 20))
-            screen.blit(high_score_text, (GRID_WIDTH // 2 - high_score_text.get_width() // 2, HEIGHT // 2 + 20))
-            screen.blit(restart_text, (GRID_WIDTH // 2 - restart_text.get_width() // 2, HEIGHT // 2 + 60))
+                # Draw panel background
+                panel_rect = pygame.Rect(GRID_WIDTH, 0, PANEL_WIDTH, HEIGHT)
+                pygame.draw.rect(screen, DARK_GRAY, panel_rect)
+                pygame.draw.line(screen, WHITE, (GRID_WIDTH, 0), (GRID_WIDTH, HEIGHT), 2)
+                
+                game_over_text = font.render('Game Over!', True, RED)
+                reason_text = font.render(death_reason, True, YELLOW)
+                score_text = font.render(f'Final Score: {score}', True, WHITE)
+                high_score_text = font.render(f'High Score: {score_manager.get_high_score()}', True, WHITE)
+                restart_text = font.render('Press SPACE to restart', True, WHITE)
+                
+                screen.blit(game_over_text, (GRID_WIDTH // 2 - game_over_text.get_width() // 2, HEIGHT // 2 - 80))
+                screen.blit(reason_text, (GRID_WIDTH // 2 - reason_text.get_width() // 2, HEIGHT // 2 - 40))
+                screen.blit(score_text, (GRID_WIDTH // 2 - score_text.get_width() // 2, HEIGHT // 2 + 0))
+                screen.blit(high_score_text, (GRID_WIDTH // 2 - high_score_text.get_width() // 2, HEIGHT // 2 + 40))
+                screen.blit(restart_text, (GRID_WIDTH // 2 - restart_text.get_width() // 2, HEIGHT // 2 + 80))
         
         pygame.display.flip()
         clock.tick(FPS)
