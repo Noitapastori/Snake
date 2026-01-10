@@ -32,7 +32,7 @@ A classic Snake game implemented in Python using Pygame, enhanced with modern fe
 ### Grid System
 - **Grid Size**: 30x30 cells
 - **Cell Size**: 20x20 pixels
-- **Window Size**: 800x600 pixels (600x600 grid + 200px side panel)
+- **Window Size**: 1024x600 pixels (600x600 grid + 424px side panel)
 - **Coordinate System**: (0,0) at top-left, (29,29) at bottom-right
 
 ### Snake Mechanics

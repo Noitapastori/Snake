@@ -8,9 +8,10 @@ import math
 GRID_SIZE = 30
 CELL_SIZE = 20
 GRID_WIDTH = GRID_SIZE * CELL_SIZE  # 600
-PANEL_WIDTH = 200
-WIDTH = GRID_WIDTH + PANEL_WIDTH  # 800 (600 grid + 200 panel)
-HEIGHT = GRID_SIZE * CELL_SIZE  # 600
+GRID_HEIGHT = GRID_SIZE * CELL_SIZE  # 600
+PANEL_WIDTH = 424
+WIDTH = GRID_WIDTH + PANEL_WIDTH  # 1024 (600 grid + 424 panel)
+HEIGHT = GRID_HEIGHT  # 600 (matches grid height)
 FPS = 30
 
 # ===== GAME TIMING CONSTANTS =====
@@ -708,7 +709,7 @@ def main():
                                     vx = math.cos(angle) * speed
                                     vy = math.sin(angle) * speed
                                     state.particles.append(Particle(head_pixel_x, head_pixel_y, vx, vy, CYAN))
-                                state.screen_shake_intensity = 10
+                                state.screen_shake_intensity = 15
                                 state.screen_shake_time = current_time
                                 # Trigger shield text effect
                                 state.shield_text_active = True
@@ -874,18 +875,16 @@ def main():
                     zoom_scale = 3.0
                 
                 # Create zoom surface
-                zoom_surface = pygame.Surface((GRID_WIDTH, HEIGHT))
+                zoom_surface = pygame.Surface((GRID_WIDTH, GRID_HEIGHT))
                 zoom_surface.fill(BLACK)
                 
-                # Calculate camera offset to center on death focal point
+                # Get focal point for zoom centering
                 focal_x, focal_y = state.death_focal_point
-                camera_x = focal_x - GRID_WIDTH // 2
-                camera_y = focal_y - HEIGHT // 2
                 
                 # Draw grid
                 for x in range(0, GRID_WIDTH, CELL_SIZE):
-                    pygame.draw.line(zoom_surface, (30, 30, 30), (x, 0), (x, HEIGHT))
-                for y in range(0, HEIGHT, CELL_SIZE):
+                    pygame.draw.line(zoom_surface, (30, 30, 30), (x, 0), (x, GRID_HEIGHT))
+                for y in range(0, GRID_HEIGHT, CELL_SIZE):
                     pygame.draw.line(zoom_surface, (30, 30, 30), (0, y), (GRID_WIDTH, y))
                 
                 # Draw particles
@@ -903,12 +902,16 @@ def main():
                 
                 # Scale the surface
                 scaled_width = int(GRID_WIDTH * zoom_scale)
-                scaled_height = int(HEIGHT * zoom_scale)
+                scaled_height = int(GRID_HEIGHT * zoom_scale)
                 scaled_surface = pygame.transform.scale(zoom_surface, (scaled_width, scaled_height))
                 
                 # Calculate blit position to center zoom on focal point
-                blit_x = -(camera_x * zoom_scale) + shake_x
-                blit_y = -(camera_y * zoom_scale) + shake_y
+                # The focal point on the scaled surface is at (focal_x * zoom_scale, focal_y * zoom_scale)
+                # We want to place it at the center of the grid area (GRID_WIDTH // 2, GRID_HEIGHT // 2)
+                scaled_focal_x = focal_x * zoom_scale
+                scaled_focal_y = focal_y * zoom_scale
+                blit_x = (GRID_WIDTH // 2) - scaled_focal_x + shake_x
+                blit_y = (GRID_HEIGHT // 2) - scaled_focal_y + shake_y
                 
                 # Blit scaled surface to screen (grid area only)
                 screen.blit(scaled_surface, (blit_x, blit_y))
@@ -917,14 +920,14 @@ def main():
                 if death_time_elapsed >= 2000:
                     fade_progress = (death_time_elapsed - 2000) / 500
                     fade_alpha = int(fade_progress * 255)
-                    fade_surface = pygame.Surface((GRID_WIDTH, HEIGHT), pygame.SRCALPHA)
+                    fade_surface = pygame.Surface((GRID_WIDTH, GRID_HEIGHT), pygame.SRCALPHA)
                     fade_surface.fill((0, 0, 0, fade_alpha))
                     screen.blit(fade_surface, (0, 0))
                 
                 # Draw panel normally
                 panel_rect = pygame.Rect(GRID_WIDTH, 0, PANEL_WIDTH, HEIGHT)
                 pygame.draw.rect(screen, DARK_GRAY, panel_rect)
-                pygame.draw.line(screen, WHITE, (GRID_WIDTH, 0), (GRID_WIDTH, HEIGHT), 2)
+                pygame.draw.line(screen, WHITE, (GRID_WIDTH, 0), (GRID_WIDTH, GRID_HEIGHT), 2)
             else:
                 # Normal rendering
                 # Draw panel background
@@ -936,8 +939,8 @@ def main():
                 
                 # Draw background grid (with shake offset, only on grid area)
                 for x in range(0, GRID_WIDTH, CELL_SIZE):
-                    pygame.draw.line(screen, (30, 30, 30), (x + shake_x, shake_y), (x + shake_x, HEIGHT + shake_y))
-                for y in range(0, HEIGHT, CELL_SIZE):
+                    pygame.draw.line(screen, (30, 30, 30), (x + shake_x, shake_y), (x + shake_x, GRID_HEIGHT + shake_y))
+                for y in range(0, GRID_HEIGHT, CELL_SIZE):
                     pygame.draw.line(screen, (30, 30, 30), (shake_x, y + shake_y), (GRID_WIDTH + shake_x, y + shake_y))
                 
                 # Update and draw particles (with shake offset)
@@ -1047,7 +1050,7 @@ def main():
                     time_since_flash = current_time - state.screen_flash_time
                     if time_since_flash < 150:  # Flash lasts 150ms
                         flash_alpha = int(80 * (1 - time_since_flash / 150))
-                        flash_surface = pygame.Surface((GRID_WIDTH, HEIGHT), pygame.SRCALPHA)
+                        flash_surface = pygame.Surface((GRID_WIDTH, GRID_HEIGHT), pygame.SRCALPHA)
                         flash_surface.fill((255, 255, 255, flash_alpha))
                         screen.blit(flash_surface, (0, 0))
                 
@@ -1067,7 +1070,7 @@ def main():
                         shield_text.set_alpha(alpha)
                         
                         # Center on game grid
-                        shield_rect = shield_text.get_rect(center=(GRID_WIDTH // 2, HEIGHT // 2 + y_offset))
+                        shield_rect = shield_text.get_rect(center=(GRID_WIDTH // 2, GRID_HEIGHT // 2 + y_offset))
                         screen.blit(shield_text, shield_rect)
                     else:
                         state.shield_text_active = False
@@ -1075,14 +1078,14 @@ def main():
                 # Draw powerup selection screen (centered on grid)
                 if state.powerup_selection_active:
                     # Semi-transparent overlay over grid only
-                    overlay = pygame.Surface((GRID_WIDTH, HEIGHT), pygame.SRCALPHA)
+                    overlay = pygame.Surface((GRID_WIDTH, GRID_HEIGHT), pygame.SRCALPHA)
                     overlay.fill((0, 0, 0, 180))
                     screen.blit(overlay, (0, 0))
                     
                     # Title
                     title_font = pygame.font.Font(None, 48)
                     title_text = title_font.render('Choose a Powerup!', True, YELLOW)
-                    title_rect = title_text.get_rect(center=(GRID_WIDTH // 2, 80))
+                    title_rect = title_text.get_rect(center=(GRID_WIDTH // 2, GRID_HEIGHT // 4))
                     screen.blit(title_text, title_rect)
                     
                     # Draw 3 powerup cards
@@ -1090,7 +1093,7 @@ def main():
                     card_height = 200
                     card_spacing = 30
                     start_x = (GRID_WIDTH - (card_width * 3 + card_spacing * 2)) // 2
-                    card_y = 180
+                    card_y = GRID_HEIGHT // 3
                     
                     for i, powerup_type in enumerate(state.powerup_choices):
                         card_x = start_x + i * (card_width + card_spacing)
@@ -1141,7 +1144,7 @@ def main():
                     time_since_countdown = current_time - state.countdown_start_time
                     
                     # Semi-transparent overlay
-                    overlay = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
+                    overlay = pygame.Surface((GRID_WIDTH, GRID_HEIGHT), pygame.SRCALPHA)
                     overlay.fill((0, 0, 0, 150))  # Black with 150 alpha
                     screen.blit(overlay, (0, 0))
                     
@@ -1201,7 +1204,7 @@ def main():
                     if abs(rotation_angle) > 0.1:
                         text_surface = pygame.transform.rotate(text_surface, -rotation_angle)
                     
-                    text_rect = text_surface.get_rect(center=(GRID_WIDTH // 2, HEIGHT // 2))
+                    text_rect = text_surface.get_rect(center=(GRID_WIDTH // 2, GRID_HEIGHT // 2))
                     
                     # Add pulsing glow effect to countdown text
                     glow_font = pygame.font.Font(None, int(font_size * 1.1))
@@ -1214,20 +1217,20 @@ def main():
                             glow_surface = pygame.transform.rotate(glow_surface, -rotation_angle)
                         
                         glow_surface.set_alpha(alpha)
-                        glow_rect = glow_surface.get_rect(center=(GRID_WIDTH // 2, HEIGHT // 2))
+                        glow_rect = glow_surface.get_rect(center=(GRID_WIDTH // 2, GRID_HEIGHT // 2))
                         screen.blit(glow_surface, glow_rect)
                     
                     screen.blit(text_surface, text_rect)
-            else:
+            elif state.game_over:
                 # Game over screen - show frozen death scene with full fade overlay
                 # Create the final frozen scene surface
-                frozen_surface = pygame.Surface((GRID_WIDTH, HEIGHT))
+                frozen_surface = pygame.Surface((GRID_WIDTH, GRID_HEIGHT))
                 frozen_surface.fill(BLACK)
                 
                 # Draw grid
                 for x in range(0, GRID_WIDTH, CELL_SIZE):
-                    pygame.draw.line(frozen_surface, (30, 30, 30), (x, 0), (x, HEIGHT))
-                for y in range(0, HEIGHT, CELL_SIZE):
+                    pygame.draw.line(frozen_surface, (30, 30, 30), (x, 0), (x, GRID_HEIGHT))
+                for y in range(0, GRID_HEIGHT, CELL_SIZE):
                     pygame.draw.line(frozen_surface, (30, 30, 30), (0, y), (GRID_WIDTH, y))
                 
                 # Don't draw particles on game over screen - they should be cleared
@@ -1245,7 +1248,7 @@ def main():
                 screen.blit(frozen_surface, (0, 0))
                 
                 # Dark fade overlay over the scene
-                fade_overlay = pygame.Surface((GRID_WIDTH, HEIGHT), pygame.SRCALPHA)
+                fade_overlay = pygame.Surface((GRID_WIDTH, GRID_HEIGHT), pygame.SRCALPHA)
                 fade_overlay.fill((0, 0, 0, 200))  # Strong fade for readability
                 screen.blit(fade_overlay, (0, 0))
                 
@@ -1264,11 +1267,11 @@ def main():
                 high_score_text = text_font.render(f'High Score: {state.score_manager.get_high_score()}', True, WHITE)
                 restart_text = text_font.render('Press SPACE to restart', True, WHITE)
                 
-                screen.blit(game_over_text, (GRID_WIDTH // 2 - game_over_text.get_width() // 2, HEIGHT // 2 - 80))
-                screen.blit(reason_text, (GRID_WIDTH // 2 - reason_text.get_width() // 2, HEIGHT // 2 - 40))
-                screen.blit(score_text, (GRID_WIDTH // 2 - score_text.get_width() // 2, HEIGHT // 2 + 0))
-                screen.blit(high_score_text, (GRID_WIDTH // 2 - high_score_text.get_width() // 2, HEIGHT // 2 + 40))
-                screen.blit(restart_text, (GRID_WIDTH // 2 - restart_text.get_width() // 2, HEIGHT // 2 + 80))
+                screen.blit(game_over_text, (GRID_WIDTH // 2 - game_over_text.get_width() // 2, GRID_HEIGHT // 2 - 80))
+                screen.blit(reason_text, (GRID_WIDTH // 2 - reason_text.get_width() // 2, GRID_HEIGHT // 2 - 40))
+                screen.blit(score_text, (GRID_WIDTH // 2 - score_text.get_width() // 2, GRID_HEIGHT // 2 + 0))
+                screen.blit(high_score_text, (GRID_WIDTH // 2 - high_score_text.get_width() // 2, GRID_HEIGHT // 2 + 40))
+                screen.blit(restart_text, (GRID_WIDTH // 2 - restart_text.get_width() // 2, GRID_HEIGHT // 2 + 80))
         
         pygame.display.flip()
         clock.tick(FPS)
