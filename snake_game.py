@@ -1,5 +1,6 @@
 import pygame
 import random
+import math
 import json
 import os
 import math
@@ -50,6 +51,19 @@ OBSTACLE_START_AREA_MAX_Y = 17
 POWERUP_SELECTION_INTERVAL = 3  # every N apples
 POWERUP_SELECTION_COUNT = 3  # 3 choices per selection
 
+# ===== DRAMATIC VISUAL EFFECTS CONSTANTS =====
+TRAIL_LENGTH = 8  # Number of trail segments behind snake (increased for visibility)
+SHOCKWAVE_MAX_RADIUS = 80  # Maximum shockwave radius
+SHOCKWAVE_DURATION = 600  # Shockwave lifetime in ms
+BORDER_PULSE_DURATION = 400  # Screen border pulse duration in ms
+BORDER_PULSE_WIDTH = 8  # Border pulse width in pixels
+
+# Enhanced particle burst settings
+FOOD_BURST_LAYERS = 3  # Multiple particle layers for drama
+COLLISION_BURST_LAYERS = 4  # Even more dramatic collision effects
+STAR_PARTICLE_POINTS = 4  # 4-pointed stars
+LIGHTNING_SEGMENTS = 3  # Lightning bolt segments
+
 # ===== COLORS (R, G, B) =====
 BLACK = (0, 0, 0)
 DARK_GRAY = (20, 20, 20)
@@ -85,12 +99,90 @@ OPPOSITE_DIRECTIONS = {UP: DOWN, DOWN: UP, LEFT: RIGHT, RIGHT: LEFT}
 
 class Snake:
     def __init__(self):
-        # Start at center with 3 segments moving right
-        self.body = [(SNAKE_START_X, SNAKE_START_Y), (SNAKE_START_X - 1, SNAKE_START_Y), (SNAKE_START_X - 2, SNAKE_START_Y)]
-        self.direction = RIGHT
+        # Start at center with 3 segments moving up (-90 degrees from initial right direction)
+        self.body = [(SNAKE_START_X, SNAKE_START_Y), (SNAKE_START_X, SNAKE_START_Y + 1), (SNAKE_START_X, SNAKE_START_Y + 2)]
+        self.direction = UP
         self.grow_pending = False
         self.interpolation = 0.0  # 0.0 to 1.0 for smooth movement between cells
         self.direction_queue = []  # Queue for buffering rapid input changes
+        
+        # Sprite system
+        self.head_sprite = None
+        self.sprite_cache = {}  # Cache for rotated sprites
+        self.use_head_sprite = False
+        self.cache_hits = 0
+        self.cache_misses = 0
+        self.load_sprites()
+    
+    def load_sprites(self):
+        """Load snake head sprite with error handling and validation"""
+        try:
+            print("[DEBUG] Loading snake head sprite from assets/sprites/snake-head.png")
+            raw_sprite = pygame.image.load('assets/sprites/snake-head.png')
+            
+            # Validate sprite dimensions
+            original_size = raw_sprite.get_size()
+            print(f"[DEBUG] Original head sprite size: {original_size}")
+            
+            if original_size[0] == 0 or original_size[1] == 0:
+                raise ValueError(f"Invalid sprite dimensions: {original_size}")
+            
+            # Convert for optimal blitting and scale to cell size
+            converted_sprite = raw_sprite.convert_alpha()
+            self.head_sprite = pygame.transform.scale(converted_sprite, (CELL_SIZE, CELL_SIZE))
+            self.use_head_sprite = True
+            
+            print(f"[DEBUG] Snake head sprite loaded successfully, scaled to {CELL_SIZE}x{CELL_SIZE}")
+            
+        except FileNotFoundError:
+            print("[DEBUG] snake-head.png not found in assets/sprites/ - using green rectangle fallback")
+            self.use_head_sprite = False
+        except pygame.error as e:
+            print(f"[DEBUG] Pygame error loading head sprite: {e} - using green rectangle fallback")
+            self.use_head_sprite = False
+        except Exception as e:
+            print(f"[DEBUG] Unexpected error loading head sprite: {e} - using green rectangle fallback")
+            self.use_head_sprite = False
+    
+    def get_direction_angle(self, direction):
+        """Convert direction tuple to rotation angle (base sprite faces LEFT)"""
+        direction_angles = {
+            LEFT: 0,       # (-1, 0) -> 0° (base orientation)
+            DOWN: 90,      # (0, 1) -> 90° clockwise
+            RIGHT: 180,    # (1, 0) -> 180°
+            UP: 270        # (0, -1) -> 270° clockwise
+        }
+        return direction_angles.get(direction, 0)
+    
+    def get_rotated_head_sprite(self, direction):
+        """Get cached rotated head sprite for given direction"""
+        if not self.use_head_sprite or not self.head_sprite:
+            return None
+            
+        angle = self.get_direction_angle(direction)
+        
+        # Check cache
+        cache_key = f"head_{angle}"
+        if cache_key in self.sprite_cache:
+            self.cache_hits += 1
+            return self.sprite_cache[cache_key]
+        
+        # Cache miss - create rotated sprite
+        self.cache_misses += 1
+        if angle == 0:
+            rotated_sprite = self.head_sprite  # No rotation needed
+        else:
+            rotated_sprite = pygame.transform.rotate(self.head_sprite, angle)  # Direct angle rotation
+        
+        # Cache management - limit cache size
+        if len(self.sprite_cache) >= 8:  # Head (4) + future tail (4)
+            oldest_key = next(iter(self.sprite_cache))
+            del self.sprite_cache[oldest_key]
+            print(f"[DEBUG] Snake sprite cache full, removed {oldest_key}")
+        
+        self.sprite_cache[cache_key] = rotated_sprite
+        print(f"[DEBUG] Cached rotated head sprite: {angle}° rotation")
+        return rotated_sprite
     
     def move(self):
         # Consume next direction from queue if available
@@ -160,20 +252,109 @@ class Snake:
         for i, segment in enumerate(self.body):
             # Use interpolated position for smooth movement
             x, y = self.get_display_position(i)
-            rect = pygame.Rect(x, y, CELL_SIZE, CELL_SIZE)
-            # Gradient effect - brighter at head, darker toward tail
-            brightness = max(100, 255 - (i * 5))
-            color = (0, brightness, 0)
-            # Draw with rounded corners
-            pygame.draw.rect(screen, color, rect, border_radius=4)
-            # Add darker outline
-            pygame.draw.rect(screen, DARK_GREEN, rect, 2, border_radius=4)
+            
+            if i == 0:  # Head segment
+                if self.use_head_sprite:
+                    # Sprite-based head rendering
+                    try:
+                        head_sprite = self.get_rotated_head_sprite(self.direction)
+                        if head_sprite:
+                            screen.blit(head_sprite, (x, y))
+                            
+                            # Log cache performance occasionally (every 200 draws)
+                            total_requests = self.cache_hits + self.cache_misses
+                            if total_requests > 0 and total_requests % 200 == 0:
+                                hit_rate = (self.cache_hits / total_requests) * 100
+                                print(f"[DEBUG] Snake sprite cache hit rate: {hit_rate:.1f}% ({self.cache_hits}/{total_requests})")
+                        else:
+                            raise ValueError("Head sprite not available")
+                    except Exception as e:
+                        print(f"[DEBUG] Error rendering head sprite, using rectangle fallback: {e}")
+                        # Fallback to rectangle rendering for head
+                        rect = pygame.Rect(x, y, CELL_SIZE, CELL_SIZE)
+                        brightness = 255  # Brightest for head
+                        color = (0, brightness, 0)
+                        pygame.draw.rect(screen, color, rect, border_radius=4)
+                        pygame.draw.rect(screen, DARK_GREEN, rect, 2, border_radius=4)
+                else:
+                    # Fallback: rectangle rendering for head
+                    rect = pygame.Rect(x, y, CELL_SIZE, CELL_SIZE)
+                    brightness = 255  # Brightest for head
+                    color = (0, brightness, 0)
+                    pygame.draw.rect(screen, color, rect, border_radius=4)
+                    pygame.draw.rect(screen, DARK_GREEN, rect, 2, border_radius=4)
+            else:
+                # Body segments: keep original rectangle rendering with gradient
+                rect = pygame.Rect(x, y, CELL_SIZE, CELL_SIZE)
+                brightness = max(100, 255 - (i * 5))
+                color = (0, brightness, 0)
+                pygame.draw.rect(screen, color, rect, border_radius=4)
+                pygame.draw.rect(screen, DARK_GREEN, rect, 2, border_radius=4)
 
 
 class Food:
     def __init__(self):
         self.position = (0, 0)
         self.pulse = 0
+        # Sprite system
+        self.original_sprite = None
+        self.sprite_cache = {}  # Cache for scaled sprites
+        self.use_sprite = False
+        self.cache_hits = 0
+        self.cache_misses = 0
+        self.load_sprite()
+    
+    def load_sprite(self):
+        """Load apple sprite with error handling and validation"""
+        try:
+            print("[DEBUG] Loading apple sprite from assets/sprites/apple.png")
+            raw_sprite = pygame.image.load('assets/sprites/apple.png')
+            
+            # Validate sprite dimensions
+            original_size = raw_sprite.get_size()
+            print(f"[DEBUG] Original sprite size: {original_size}")
+            
+            if original_size[0] == 0 or original_size[1] == 0:
+                raise ValueError(f"Invalid sprite dimensions: {original_size}")
+            
+            # Convert for optimal blitting and scale to cell size
+            converted_sprite = raw_sprite.convert_alpha()
+            self.original_sprite = pygame.transform.scale(converted_sprite, (CELL_SIZE, CELL_SIZE))
+            self.use_sprite = True
+            
+            print(f"[DEBUG] Apple sprite loaded successfully, scaled to {CELL_SIZE}x{CELL_SIZE}")
+            
+        except FileNotFoundError:
+            print("[DEBUG] apple.png not found in assets/sprites/ - using red rectangle fallback")
+            self.use_sprite = False
+        except pygame.error as e:
+            print(f"[DEBUG] Pygame error loading sprite: {e} - using red rectangle fallback")
+            self.use_sprite = False
+        except Exception as e:
+            print(f"[DEBUG] Unexpected error loading sprite: {e} - using red rectangle fallback")
+            self.use_sprite = False
+    
+    def get_cached_sprite(self, size_offset):
+        """Get cached sprite for given size offset, create if not cached"""
+        if size_offset in self.sprite_cache:
+            self.cache_hits += 1
+            return self.sprite_cache[size_offset]
+        
+        # Cache miss - create new scaled sprite
+        self.cache_misses += 1
+        sprite_size = max(1, CELL_SIZE + size_offset)  # Prevent zero/negative size
+        scaled_sprite = pygame.transform.scale(self.original_sprite, (sprite_size, sprite_size))
+        
+        # Cache management - limit cache size to prevent memory issues
+        if len(self.sprite_cache) >= 10:  # Limit to 10 cached sizes
+            # Remove oldest entry (simple FIFO)
+            oldest_key = next(iter(self.sprite_cache))
+            del self.sprite_cache[oldest_key]
+            print(f"[DEBUG] Sprite cache full, removed size offset {oldest_key}")
+        
+        self.sprite_cache[size_offset] = scaled_sprite
+        print(f"[DEBUG] Cached new sprite size: {sprite_size}x{sprite_size} (offset: {size_offset})")
+        return scaled_sprite
     
     def spawn(self, snake_body_and_obstacles):
         # Keep generating random positions until we find one not on the snake or obstacles
@@ -193,24 +374,62 @@ class Food:
         # Pulse animation
         self.pulse += 0.1
         size_offset = int(math.sin(self.pulse) * 3)
-        rect = pygame.Rect(x * CELL_SIZE, y * CELL_SIZE, CELL_SIZE, CELL_SIZE)
-        adjusted_rect = rect.inflate(size_offset, size_offset)
-        pygame.draw.rect(screen, RED, adjusted_rect, border_radius=4)
+        
+        if self.use_sprite and self.original_sprite:
+            # Sprite-based rendering with caching
+            try:
+                scaled_sprite = self.get_cached_sprite(size_offset)
+                
+                # Calculate position to center the scaled sprite
+                sprite_x = x * CELL_SIZE - size_offset // 2
+                sprite_y = y * CELL_SIZE - size_offset // 2
+                
+                screen.blit(scaled_sprite, (sprite_x, sprite_y))
+                
+                # Log cache performance occasionally (every 100 draws)
+                total_requests = self.cache_hits + self.cache_misses
+                if total_requests > 0 and total_requests % 100 == 0:
+                    hit_rate = (self.cache_hits / total_requests) * 100
+                    print(f"[DEBUG] Sprite cache hit rate: {hit_rate:.1f}% ({self.cache_hits}/{total_requests})")
+                    
+            except Exception as e:
+                print(f"[DEBUG] Error rendering sprite, falling back to rectangle: {e}")
+                # Fallback to rectangle rendering
+                rect = pygame.Rect(x * CELL_SIZE, y * CELL_SIZE, CELL_SIZE, CELL_SIZE)
+                adjusted_rect = rect.inflate(size_offset, size_offset)
+                pygame.draw.rect(screen, RED, adjusted_rect, border_radius=4)
+        else:
+            # Fallback: Original red rectangle rendering
+            rect = pygame.Rect(x * CELL_SIZE, y * CELL_SIZE, CELL_SIZE, CELL_SIZE)
+            adjusted_rect = rect.inflate(size_offset, size_offset)
+            pygame.draw.rect(screen, RED, adjusted_rect, border_radius=4)
 
 
 class Particle:
-    def __init__(self, x, y, velocity_x, velocity_y, color):
+    # Particle shape types for dramatic variety
+    CIRCLE = 'circle'
+    STAR = 'star'
+    LIGHTNING = 'lightning'
+    DIAMOND = 'diamond'
+    STREAK = 'streak'
+    
+    def __init__(self, x, y, velocity_x, velocity_y, color, shape='circle', size=5, lifetime=600):
         self.x = x
         self.y = y
         self.vx = velocity_x
         self.vy = velocity_y
-        self.lifetime = 600  # milliseconds
+        self.lifetime = lifetime  # milliseconds - now configurable
         self.created_time = pygame.time.get_ticks()
         self.color = color
+        self.shape = shape
+        self.initial_size = size
+        self.rotation = random.uniform(0, 360)  # For rotating shapes
+        self.rotation_speed = random.uniform(-5, 5)  # Rotation animation
     
     def update(self):
         self.x += self.vx
         self.y += self.vy
+        self.rotation += self.rotation_speed  # Animate rotation
     
     def is_alive(self):
         return pygame.time.get_ticks() - self.created_time < self.lifetime
@@ -220,16 +439,174 @@ class Particle:
         progress = age / self.lifetime
         # Fade alpha and size as particle ages
         alpha = max(0, min(255, int(255 * (1 - progress))))  # Clamp to valid range
-        radius = max(1, int(5 * (1 - progress * 0.5)))  # Ensure radius is at least 1
+        size = max(1, int(self.initial_size * (1 - progress * 0.5)))  # Ensure size is at least 1
         
-        if radius > 0 and alpha > 0:
-            # Draw circle with fade effect using per-pixel alpha
-            surface = pygame.Surface((radius*2, radius*2), pygame.SRCALPHA)
-            # Handle both RGB and RGBA colors - ensure all values are integers
+        if size > 0 and alpha > 0:
             color_rgb = (int(self.color[0]), int(self.color[1]), int(self.color[2]))
             color_with_alpha = (color_rgb[0], color_rgb[1], color_rgb[2], alpha)
-            pygame.draw.circle(surface, color_with_alpha, (radius, radius), radius)
-            screen.blit(surface, (self.x - radius, self.y - radius))
+            
+            if self.shape == Particle.CIRCLE:
+                # Original circle particles
+                surface = pygame.Surface((size*2, size*2), pygame.SRCALPHA)
+                pygame.draw.circle(surface, color_with_alpha, (size, size), size)
+                screen.blit(surface, (self.x - size, self.y - size))
+                
+            elif self.shape == Particle.STAR:
+                # 4-pointed star for food collection drama
+                self._draw_star(screen, self.x, self.y, size, color_with_alpha)
+                
+            elif self.shape == Particle.LIGHTNING:
+                # Jagged lightning bolt for collision drama
+                self._draw_lightning(screen, self.x, self.y, size, color_with_alpha)
+                
+            elif self.shape == Particle.DIAMOND:
+                # Diamond sparkles for powerup effects
+                self._draw_diamond(screen, self.x, self.y, size, color_with_alpha)
+                
+            elif self.shape == Particle.STREAK:
+                # Motion streaks for trail effects
+                self._draw_streak(screen, self.x, self.y, size, color_with_alpha)
+    
+    def _draw_star(self, screen, x, y, size, color):
+        """Draw performance-optimized 4-pointed star"""
+        points = []
+        for i in range(8):  # 4 points + 4 inner points
+            angle = (i * 45 + self.rotation) * math.pi / 180
+            radius = size if i % 2 == 0 else size * 0.4  # Alternate outer/inner points
+            px = x + math.cos(angle) * radius
+            py = y + math.sin(angle) * radius
+            points.append((px, py))
+        
+        if len(points) >= 3:
+            surface = pygame.Surface((size*3, size*3), pygame.SRCALPHA)
+            offset_points = [(px - x + size*1.5, py - y + size*1.5) for px, py in points]
+            pygame.draw.polygon(surface, color, offset_points)
+            screen.blit(surface, (x - size*1.5, y - size*1.5))
+    
+    def _draw_lightning(self, screen, x, y, size, color):
+        """Draw jagged lightning bolt"""
+        surface = pygame.Surface((size*3, size*4), pygame.SRCALPHA)
+        # Create jagged lightning path
+        points = [
+            (size*1.5, 0),
+            (size*1.2, size),
+            (size*1.8, size*1.5),
+            (size*1.0, size*2.5),
+            (size*2.0, size*3),
+            (size*1.5, size*4)
+        ]
+        if len(points) >= 2:
+            pygame.draw.lines(surface, color, False, points, max(1, size//3))
+        screen.blit(surface, (x - size*1.5, y - size*2))
+    
+    def _draw_diamond(self, screen, x, y, size, color):
+        """Draw diamond sparkle"""
+        points = [
+            (x, y - size),      # top
+            (x + size, y),      # right
+            (x, y + size),      # bottom
+            (x - size, y)       # left
+        ]
+        surface = pygame.Surface((size*3, size*3), pygame.SRCALPHA)
+        offset_points = [(px - x + size*1.5, py - y + size*1.5) for px, py in points]
+        pygame.draw.polygon(surface, color, offset_points)
+        screen.blit(surface, (x - size*1.5, y - size*1.5))
+    
+    def _draw_streak(self, screen, x, y, size, color):
+        """Draw motion streak rectangle"""
+        # Create elongated rectangle based on velocity direction
+        length = size * 3
+        width = max(1, size // 2)
+        angle = math.atan2(self.vy, self.vx)
+        
+        surface = pygame.Surface((length + width, width*2), pygame.SRCALPHA)
+        rect = pygame.Rect(0, width//2, length, width)
+        pygame.draw.rect(surface, color, rect)
+        
+        # Rotate surface based on movement direction
+        if angle != 0:
+            surface = pygame.transform.rotate(surface, -math.degrees(angle))
+        
+        rect = surface.get_rect(center=(x, y))
+        screen.blit(surface, rect)
+
+
+class ShockwaveRing:
+    """Expanding shockwave rings for dramatic collision effects"""
+    def __init__(self, x, y, color, max_radius=80, duration=600, width=3):
+        self.x = x
+        self.y = y
+        self.color = color
+        self.max_radius = max_radius
+        self.duration = duration
+        self.width = width
+        self.created_time = pygame.time.get_ticks()
+    
+    def update(self):
+        pass  # No position updates needed
+    
+    def is_alive(self):
+        return pygame.time.get_ticks() - self.created_time < self.duration
+    
+    def draw(self, screen):
+        age = pygame.time.get_ticks() - self.created_time
+        progress = age / self.duration
+        
+        if progress < 1.0:
+            # Ring expands and fades
+            current_radius = int(self.max_radius * progress)
+            alpha = max(0, int(255 * (1 - progress)))
+            
+            if current_radius > 0 and alpha > 0:
+                color_rgb = (int(self.color[0]), int(self.color[1]), int(self.color[2]))
+                color_with_alpha = (color_rgb[0], color_rgb[1], color_rgb[2], alpha)
+                
+                # Create surface for the ring
+                ring_surface = pygame.Surface((current_radius*2 + self.width*2, current_radius*2 + self.width*2), pygame.SRCALPHA)
+                pygame.draw.circle(ring_surface, color_with_alpha, (current_radius + self.width, current_radius + self.width), current_radius, self.width)
+                
+                screen.blit(ring_surface, (self.x - current_radius - self.width, self.y - current_radius - self.width))
+
+
+class TrailSegment:
+    """Snake trail segment for motion effects"""
+    def __init__(self, x, y, color, lifetime=400):
+        self.x = x
+        self.y = y
+        self.color = color
+        self.lifetime = lifetime
+        self.created_time = pygame.time.get_ticks()
+    
+    def is_alive(self):
+        return pygame.time.get_ticks() - self.created_time < self.lifetime
+    
+    def draw(self, screen):
+        age = pygame.time.get_ticks() - self.created_time
+        progress = age / self.lifetime
+        alpha = max(0, int(150 * (1 - progress)))  # Much more visible - start at 150 alpha
+        size_factor = 0.8 * (1 - progress * 0.2)  # Larger and shrink less
+        
+        if alpha > 0:
+            color_rgb = (int(self.color[0]), int(self.color[1]), int(self.color[2]))
+            color_with_alpha = (color_rgb[0], color_rgb[1], color_rgb[2], alpha)
+            
+            # Draw more visible trail segment
+            trail_size = int(CELL_SIZE * size_factor)
+            offset = (CELL_SIZE - trail_size) // 2
+            
+            surface = pygame.Surface((trail_size, trail_size), pygame.SRCALPHA)
+            pygame.draw.rect(surface, color_with_alpha, (0, 0, trail_size, trail_size), border_radius=3)
+            # Add a subtle glow effect
+            if alpha > 50:  # Only add glow when trail is still fairly visible
+                glow_size = trail_size + 4
+                glow_offset = offset - 2
+                glow_alpha = alpha // 3
+                glow_color = (color_rgb[0], color_rgb[1], color_rgb[2], glow_alpha)
+                glow_surface = pygame.Surface((glow_size, glow_size), pygame.SRCALPHA)
+                pygame.draw.rect(glow_surface, glow_color, (0, 0, glow_size, glow_size), border_radius=5)
+                screen.blit(glow_surface, (self.x + glow_offset, self.y + glow_offset))
+            
+            screen.blit(surface, (self.x + offset, self.y + offset))
 
 
 class Obstacle:
@@ -369,6 +746,71 @@ class Powerup:
     GHOST_MODE = 'ghost_mode'
     SPEED_BOOST = 'speed_boost'
     
+    # Class-level sprite cache (shared across all instances)
+    _sprite_cache = {}
+    _sprites_loaded = False
+    
+    @classmethod
+    def load_sprites(cls):
+        """Load all powerup sprites with error handling"""
+        if cls._sprites_loaded:
+            return
+            
+        sprite_files = {
+            cls.SHIELD: 'assets/sprites/shield.png',
+            cls.DOUBLE_POINTS: 'assets/sprites/double-points.png', 
+            cls.GHOST_MODE: 'assets/sprites/ghost-mode.png',
+            cls.SPEED_BOOST: 'assets/sprites/speed-boost.png'
+        }
+        
+        for powerup_type, file_path in sprite_files.items():
+            try:
+                print(f"[DEBUG] Loading powerup sprite: {file_path}")
+                raw_sprite = pygame.image.load(file_path)
+                
+                # Validate sprite dimensions
+                original_size = raw_sprite.get_size()
+                print(f"[DEBUG] Original {powerup_type} sprite size: {original_size}")
+                
+                if original_size[0] == 0 or original_size[1] == 0:
+                    raise ValueError(f"Invalid sprite dimensions: {original_size}")
+                
+                # Convert for optimal blitting
+                converted_sprite = raw_sprite.convert_alpha()
+                
+                # Store multiple sizes for different use cases
+                # For 60x60 selection cards - use original if already 60x60, otherwise scale
+                if original_size == (60, 60):
+                    cls._sprite_cache[f"{powerup_type}_60"] = converted_sprite  # Use directly, no scaling
+                else:
+                    cls._sprite_cache[f"{powerup_type}_60"] = pygame.transform.scale(converted_sprite, (60, 60))
+                
+                # For 32x32 indicators - always downscale from 60x60 for best quality
+                if original_size == (60, 60):
+                    cls._sprite_cache[f"{powerup_type}_32"] = pygame.transform.scale(converted_sprite, (32, 32))  # High-quality downscale
+                else:
+                    # Fallback for other sizes
+                    cls._sprite_cache[f"{powerup_type}_32"] = pygame.transform.scale(converted_sprite, (32, 32))
+                
+                print(f"[DEBUG] {powerup_type.title()} powerup sprite loaded successfully")
+                
+            except FileNotFoundError:
+                print(f"[DEBUG] {file_path} not found - using text icon fallback for {powerup_type}")
+            except pygame.error as e:
+                print(f"[DEBUG] Pygame error loading {powerup_type} sprite: {e} - using text icon fallback")
+            except Exception as e:
+                print(f"[DEBUG] Unexpected error loading {powerup_type} sprite: {e} - using text icon fallback")
+        
+        cls._sprites_loaded = True
+        print(f"[DEBUG] Powerup sprite loading complete. Loaded sprites: {len([k for k in cls._sprite_cache.keys() if k.endswith('_32')])}")
+    
+    @classmethod
+    def get_sprite(cls, powerup_type, size=32):
+        """Get powerup sprite for given type and size"""
+        cls.load_sprites()  # Ensure sprites are loaded
+        cache_key = f"{powerup_type}_{size}"
+        return cls._sprite_cache.get(cache_key, None)
+    
     # Powerup metadata
     INFO = {
         SHIELD: {
@@ -499,6 +941,13 @@ class GameState:
         self.screen_flash_time = 0
         self.shield_text_active = False
         self.shield_text_time = 0
+        
+        # Dramatic visual effects
+        self.shockwave_rings = []  # List of ShockwaveRing objects
+        self.snake_trail = []  # List of TrailSegment objects
+        self.border_pulse_time = 0  # Screen border pulse timing
+        self.border_pulse_color = WHITE  # Current border pulse color
+        self.last_snake_position = None  # For trail generation
     
     def reset_game(self, current_time):
         """Reset game state for a new game"""
@@ -523,6 +972,187 @@ class GameState:
         self.death_reason = ""
         self.death_animation_active = False
         self.shield_text_active = False
+        
+        # Reset dramatic visual effects
+        self.shockwave_rings = []
+        self.snake_trail = []
+        self.border_pulse_time = 0
+        self.border_pulse_color = WHITE
+        self.last_snake_position = self.snake.body[0] if self.snake.body else None  # Initialize with current head position
+
+
+def create_dramatic_burst(particles_list, x, y, event_type, current_time, extra_color=None):
+    """Create multi-layered dramatic particle bursts for maximum visual impact"""
+    
+    if event_type == 'food':
+        # FOOD COLLECTION: 3-layer star burst with sparkle trails
+        base_color = extra_color if extra_color else YELLOW
+        secondary_color = RED
+        
+        # Layer 1: Fast outer ring of stars (dramatic spread)
+        for i in range(16):
+            angle = (i / 16) * 2 * math.pi
+            speed = 5 + random.uniform(0, 3)
+            vx = math.cos(angle) * speed
+            vy = math.sin(angle) * speed
+            color = base_color if i % 3 != 0 else secondary_color
+            particles_list.append(Particle(x, y, vx, vy, color, Particle.STAR, 6, 800))
+        
+        # Layer 2: Medium diamond sparkles (visual density)
+        for i in range(12):
+            angle = random.uniform(0, 2 * math.pi)
+            speed = 3 + random.uniform(0, 2)
+            vx = math.cos(angle) * speed
+            vy = math.sin(angle) * speed
+            particles_list.append(Particle(x, y, vx, vy, base_color, Particle.DIAMOND, 4, 600))
+        
+        # Layer 3: Slow core particles (lingering effect)
+        for i in range(8):
+            angle = random.uniform(0, 2 * math.pi)
+            speed = 1 + random.uniform(0, 1)
+            vx = math.cos(angle) * speed
+            vy = math.sin(angle) * speed
+            particles_list.append(Particle(x, y, vx, vy, WHITE, Particle.CIRCLE, 3, 1000))
+    
+    elif event_type == 'collision':
+        # COLLISION: 4-layer lightning explosion with maximum drama
+        colors = [RED, ORANGE, YELLOW, WHITE]
+        
+        # Layer 1: Lightning bolts (outer dramatic ring)
+        for i in range(20):
+            angle = (i / 20) * 2 * math.pi
+            speed = 6 + random.uniform(0, 4)
+            vx = math.cos(angle) * speed
+            vy = math.sin(angle) * speed
+            color = random.choice(colors)
+            particles_list.append(Particle(x, y, vx, vy, color, Particle.LIGHTNING, 8, 900))
+        
+        # Layer 2: Star burst (medium spread)
+        for i in range(15):
+            angle = (i / 15) * 2 * math.pi
+            speed = 4 + random.uniform(0, 2)
+            vx = math.cos(angle) * speed
+            vy = math.sin(angle) * speed
+            particles_list.append(Particle(x, y, vx, vy, ORANGE, Particle.STAR, 6, 700))
+        
+        # Layer 3: Diamond shards (inner density)
+        for i in range(12):
+            angle = random.uniform(0, 2 * math.pi)
+            speed = 2 + random.uniform(0, 2)
+            vx = math.cos(angle) * speed
+            vy = math.sin(angle) * speed
+            particles_list.append(Particle(x, y, vx, vy, YELLOW, Particle.DIAMOND, 4, 800))
+        
+        # Layer 4: Slow burning core (maximum drama)
+        for i in range(8):
+            angle = random.uniform(0, 2 * math.pi)
+            speed = 0.5 + random.uniform(0, 1)
+            vx = math.cos(angle) * speed
+            vy = math.sin(angle) * speed
+            particles_list.append(Particle(x, y, vx, vy, RED, Particle.CIRCLE, 5, 1200))
+    
+    elif event_type == 'shield_break':
+        # SHIELD BREAK: Cyan lightning burst with sparkles
+        for i in range(20):
+            angle = (i / 20) * 2 * math.pi
+            speed = 4 + random.uniform(0, 3)
+            vx = math.cos(angle) * speed
+            vy = math.sin(angle) * speed
+            shape = Particle.LIGHTNING if i % 3 == 0 else Particle.STAR
+            particles_list.append(Particle(x, y, vx, vy, CYAN, shape, 6, 700))
+
+
+def create_shockwave_ring(rings_list, x, y, color, max_radius=80):
+    """Add dramatic shockwave ring effect"""
+    rings_list.append(ShockwaveRing(x, y, color, max_radius, SHOCKWAVE_DURATION, 4))
+
+
+def trigger_border_pulse(state, color, current_time):
+    """Trigger dramatic screen border pulse effect"""
+    state.border_pulse_time = current_time
+    state.border_pulse_color = color
+
+
+def update_snake_trail(state, current_time):
+    """Update snake motion trail for dramatic movement effects"""
+    # Get current snake head position
+    head_pos = state.snake.body[0] if state.snake.body else None
+    
+    if head_pos is None:
+        return
+    
+    # Always create trail if we have a previous position and it's different
+    if (state.last_snake_position is not None and 
+        state.last_snake_position != head_pos):
+        
+        # Create trail at the PREVIOUS head position (where snake was)
+        prev_pixel_x = state.last_snake_position[0] * CELL_SIZE
+        prev_pixel_y = state.last_snake_position[1] * CELL_SIZE
+        
+        # Determine trail color based on active powerups
+        trail_color = GREEN
+        for powerup in state.active_powerups:
+            if powerup.active:
+                if powerup.type == Powerup.SHIELD:
+                    trail_color = CYAN
+                    break
+                elif powerup.type == Powerup.GHOST_MODE:
+                    trail_color = PURPLE
+                    break
+                elif powerup.type == Powerup.SPEED_BOOST:
+                    trail_color = ORANGE
+                    break
+        
+        # Add trail segment at previous position
+        state.snake_trail.append(TrailSegment(prev_pixel_x, prev_pixel_y, trail_color, 400))  # Longer lifetime for visibility
+        
+        # Limit trail length for performance
+        if len(state.snake_trail) > TRAIL_LENGTH:
+            state.snake_trail = state.snake_trail[-TRAIL_LENGTH:]
+    
+    # Always update last position (even if we didn't create a trail)
+    state.last_snake_position = head_pos
+    
+    # Clean up expired trail segments
+    state.snake_trail = [trail for trail in state.snake_trail if trail.is_alive()]
+
+
+def draw_border_pulse(screen, state, current_time):
+    """Draw dramatic screen border pulse effect"""
+    if state.border_pulse_time > 0:
+        time_since_pulse = current_time - state.border_pulse_time
+        if time_since_pulse < BORDER_PULSE_DURATION:
+            # Pulse intensity decreases over time
+            intensity = 1 - (time_since_pulse / BORDER_PULSE_DURATION)
+            alpha = int(255 * intensity * 0.8)  # Max 80% opacity
+            width = int(BORDER_PULSE_WIDTH * intensity)
+            
+            if alpha > 0 and width > 0:
+                color_rgb = (int(state.border_pulse_color[0]), 
+                           int(state.border_pulse_color[1]), 
+                           int(state.border_pulse_color[2]))
+                color_with_alpha = (color_rgb[0], color_rgb[1], color_rgb[2], alpha)
+                
+                # Create border pulse surface
+                pulse_surface = pygame.Surface((GRID_WIDTH, GRID_HEIGHT), pygame.SRCALPHA)
+                
+                # Draw pulsing border on all 4 edges
+                for i in range(width):
+                    current_alpha = int(alpha * (1 - i / width))  # Fade outward
+                    edge_color = (color_rgb[0], color_rgb[1], color_rgb[2], current_alpha)
+                    
+                    # Top border
+                    pygame.draw.rect(pulse_surface, edge_color, (0, i, GRID_WIDTH, 1))
+                    # Bottom border  
+                    pygame.draw.rect(pulse_surface, edge_color, (0, GRID_HEIGHT - 1 - i, GRID_WIDTH, 1))
+                    # Left border
+                    pygame.draw.rect(pulse_surface, edge_color, (i, 0, 1, GRID_HEIGHT))
+                    # Right border
+                    pygame.draw.rect(pulse_surface, edge_color, (GRID_WIDTH - 1 - i, 0, 1, GRID_HEIGHT))
+                
+                screen.blit(pulse_surface, (0, 0))
+        else:
+            state.border_pulse_time = 0  # Reset pulse
 
 
 def main():
@@ -657,6 +1287,9 @@ def main():
                     current_move_delay = int(MOVE_DELAY * 0.5)  # 50% faster
             
             if not state.countdown_active and not state.powerup_selection_active and not state.death_animation_active and time_since_move >= current_move_delay:
+                # Update snake trail BEFORE any movement or collision logic
+                update_snake_trail(state, current_time)
+                
                 # Check if ghost mode is active (allows passing through self)
                 ghost_mode_active = any(p.type == Powerup.GHOST_MODE and p.active for p in state.active_powerups)
                 
@@ -699,16 +1332,20 @@ def main():
                         for powerup in state.active_powerups:
                             if powerup.type == Powerup.SHIELD and powerup.active:
                                 powerup.active = False  # Shield breaks
-                                # Create shield break effect
+                                # Create DRAMATIC shield break effect
                                 head_x, head_y = state.snake.body[0]
                                 head_pixel_x = head_x * CELL_SIZE + CELL_SIZE // 2
                                 head_pixel_y = head_y * CELL_SIZE + CELL_SIZE // 2
-                                for i in range(16):
-                                    angle = (i / 16) * 2 * math.pi
-                                    speed = 3 + random.uniform(0, 2)
-                                    vx = math.cos(angle) * speed
-                                    vy = math.sin(angle) * speed
-                                    state.particles.append(Particle(head_pixel_x, head_pixel_y, vx, vy, CYAN))
+                                
+                                # Dramatic shield break burst
+                                create_dramatic_burst(state.particles, head_pixel_x, head_pixel_y, 'shield_break', current_time)
+                                
+                                # Add shockwave ring for extra drama
+                                create_shockwave_ring(state.shockwave_rings, head_pixel_x, head_pixel_y, CYAN, 60)
+                                
+                                # Screen border pulse
+                                trigger_border_pulse(state, CYAN, current_time)
+                                
                                 state.screen_shake_intensity = 15
                                 state.screen_shake_time = current_time
                                 # Trigger shield text effect
@@ -722,6 +1359,7 @@ def main():
                         state.death_animation_active = True
                         state.death_animation_start = current_time
                         state.particles.clear()  # Clear any existing particles before creating new ones
+                        state.shockwave_rings.clear()  # Clear existing shockwaves
                         
                         # Get snake head position for zoom focal point
                         head_x, head_y = state.snake.body[0]
@@ -730,26 +1368,16 @@ def main():
                         state.death_focal_point = (head_pixel_x, head_pixel_y)
                         state.death_collision_type = collision_type
                         
-                        # Create dramatic collision particle explosion
-                        particle_count = 40  # More particles for drama
-                        particle_colors = [RED, ORANGE, YELLOW, WHITE]
+                        # MAXIMUM DRAMATIC COLLISION BURST
+                        create_dramatic_burst(state.particles, head_pixel_x, head_pixel_y, 'collision', current_time)
                         
-                        # Ring of fast particles
-                        for i in range(particle_count):
-                            angle = (i / particle_count) * 2 * math.pi
-                            speed = 4 + random.uniform(0, 3)
-                            vx = math.cos(angle) * speed
-                            vy = math.sin(angle) * speed
-                            color = random.choice(particle_colors)
-                            state.particles.append(Particle(head_pixel_x, head_pixel_y, vx, vy, color))
+                        # Multiple expanding shockwave rings for ultimate drama
+                        create_shockwave_ring(state.shockwave_rings, head_pixel_x, head_pixel_y, RED, 120)
+                        create_shockwave_ring(state.shockwave_rings, head_pixel_x, head_pixel_y, ORANGE, 80)
+                        create_shockwave_ring(state.shockwave_rings, head_pixel_x, head_pixel_y, YELLOW, 40)
                         
-                        # Extra burst of slow particles for depth
-                        for i in range(20):
-                            angle = random.uniform(0, 2 * math.pi)
-                            speed = 1 + random.uniform(0, 2)
-                            vx = math.cos(angle) * speed
-                            vy = math.sin(angle) * speed
-                            state.particles.append(Particle(head_pixel_x, head_pixel_y, vx, vy, RED))
+                        # Dramatic red border pulse
+                        trigger_border_pulse(state, RED, current_time)
                         
                         # Massive screen shake
                         state.screen_shake_intensity = 15
@@ -768,40 +1396,30 @@ def main():
                 else:
                     # Check food collision
                     if state.snake.body[0] == state.food.get_position():
-                        # Spawn enhanced particle effect at food position
+                        # Spawn SPECTACULAR food collection effect
                         food_pixel_x = state.food.position[0] * CELL_SIZE + CELL_SIZE // 2
                         food_pixel_y = state.food.position[1] * CELL_SIZE + CELL_SIZE // 2
                         
                         # Check if double points is active
                         points_to_add = 10
+                        burst_color = YELLOW  # Default color
                         for powerup in state.active_powerups:
                             if powerup.type == Powerup.DOUBLE_POINTS and powerup.active:
                                 points_to_add = 20
+                                burst_color = YELLOW  # All yellow for double points
                                 powerup.remaining_uses -= 1
                                 if powerup.remaining_uses <= 0:
                                     powerup.active = False
                                 break
                         
-                        # Main burst - 20 particles in circle
-                        for i in range(20):
-                            angle = (i / 20) * 2 * math.pi
-                            speed = 2 + random.uniform(-0.5, 1.5)  # Variable speed
-                            vx = math.cos(angle) * speed
-                            vy = math.sin(angle) * speed
-                            # Mix of red and yellow particles (or all yellow if double points)
-                            if points_to_add == 20:
-                                color = YELLOW
-                            else:
-                                color = RED if i % 3 != 0 else YELLOW
-                            state.particles.append(Particle(food_pixel_x, food_pixel_y, vx, vy, color))
+                        # DRAMATIC FOOD COLLECTION BURST
+                        create_dramatic_burst(state.particles, food_pixel_x, food_pixel_y, 'food', current_time, burst_color)
                         
-                        # Extra fast particles for emphasis
-                        for i in range(8):
-                            angle = random.uniform(0, 2 * math.pi)
-                            speed = 4 + random.uniform(0, 2)
-                            vx = math.cos(angle) * speed
-                            vy = math.sin(angle) * speed
-                            state.particles.append(Particle(food_pixel_x, food_pixel_y, vx, vy, YELLOW))
+                        # Add shockwave ring for extra spectacle
+                        create_shockwave_ring(state.shockwave_rings, food_pixel_x, food_pixel_y, burst_color, 50)
+                        
+                        # Screen border pulse
+                        trigger_border_pulse(state, burst_color, current_time)
                         
                         # Trigger screen shake
                         state.screen_shake_intensity = 8
@@ -829,6 +1447,9 @@ def main():
                 # Reset interpolation after move
                 state.snake.interpolation = 0.0
                 state.last_move_time = current_time
+            
+            # Clean up expired shockwave rings
+            state.shockwave_rings = [ring for ring in state.shockwave_rings if ring.is_alive()]
             
             # Clean up expired powerups
             state.active_powerups = [p for p in state.active_powerups if not p.is_expired(current_time)]
@@ -890,6 +1511,10 @@ def main():
                 # Draw particles
                 for particle in state.particles:
                     particle.draw(zoom_surface)
+                
+                # Draw shockwave rings
+                for ring in state.shockwave_rings:
+                    ring.draw(zoom_surface)
                 
                 # Draw obstacles
                 state.obstacle.draw(zoom_surface)
@@ -954,8 +1579,21 @@ def main():
                     particle.draw(screen)
                     particle.x, particle.y = original_x, original_y
                 
+                # Draw shockwave rings (with shake offset)
+                for ring in state.shockwave_rings:
+                    # Temporarily offset ring position for shake
+                    original_x, original_y = ring.x, ring.y
+                    ring.x += shake_x
+                    ring.y += shake_y
+                    ring.draw(screen)
+                    ring.x, ring.y = original_x, original_y
+                
                 # Draw obstacles
                 state.obstacle.draw(screen)
+                
+                # Draw snake trails AFTER obstacles but BEFORE snake for visibility
+                for trail in state.snake_trail:
+                    trail.draw(screen)
                 
                 # Initialize font for panel UI
                 font = font_manager.get_font(36)
@@ -965,6 +1603,9 @@ def main():
                 state.particles = [p for p in state.particles if p.is_alive()]
                 for particle in state.particles:
                     particle.update()
+                # Update shockwaves too
+                for ring in state.shockwave_rings:
+                    ring.update()
             
             if not state.game_over and not state.death_animation_active:
                 # Draw game elements
@@ -1024,11 +1665,17 @@ def main():
                             pygame.draw.rect(screen, info['color'], bar_rect, border_radius=8)
                             pygame.draw.rect(screen, WHITE, bar_rect, 2, border_radius=8)
                             
-                            # Icon (larger)
-                            icon_font = pygame.font.Font(None, 32)
-                            icon_text = icon_font.render(info['icon'], True, BLACK)
-                            icon_rect = icon_text.get_rect(center=(bar_x + 20, indicator_y + 20))
-                            screen.blit(icon_text, icon_rect)
+                            # Icon (sprite or text fallback)
+                            sprite = Powerup.get_sprite(powerup.type, 32)
+                            if sprite:
+                                icon_rect = sprite.get_rect(center=(bar_x + 20, indicator_y + 20))
+                                screen.blit(sprite, icon_rect)
+                            else:
+                                # Fallback to text icon
+                                icon_font = pygame.font.Font(None, 32)
+                                icon_text = icon_font.render(info['icon'], True, BLACK)
+                                icon_rect = icon_text.get_rect(center=(bar_x + 20, indicator_y + 20))
+                                screen.blit(icon_text, icon_rect)
                             
                             # Name
                             name_text = indicator_font.render(info['name'], True, BLACK)
@@ -1053,6 +1700,9 @@ def main():
                         flash_surface = pygame.Surface((GRID_WIDTH, GRID_HEIGHT), pygame.SRCALPHA)
                         flash_surface.fill((255, 255, 255, flash_alpha))
                         screen.blit(flash_surface, (0, 0))
+                
+                # Draw DRAMATIC border pulse effect
+                draw_border_pulse(screen, state, current_time)
                 
                 # Draw shield used text (floating upward with fade)
                 if state.shield_text_active:
@@ -1112,11 +1762,17 @@ def main():
                             pygame.draw.rect(screen, info['color'], card_rect, border_radius=10)
                             pygame.draw.rect(screen, DARK_GRAY, card_rect, 2, border_radius=10)
                         
-                        # Icon
-                        icon_font = pygame.font.Font(None, 60)
-                        icon_text = icon_font.render(info['icon'], True, BLACK)
-                        icon_rect = icon_text.get_rect(center=(card_x + card_width // 2, card_y + 50))
-                        screen.blit(icon_text, icon_rect)
+                        # Icon (sprite or text fallback)
+                        sprite = Powerup.get_sprite(powerup_type, 60)
+                        if sprite:
+                            icon_rect = sprite.get_rect(center=(card_x + card_width // 2, card_y + 50))
+                            screen.blit(sprite, icon_rect)
+                        else:
+                            # Fallback to text icon
+                            icon_font = pygame.font.Font(None, 60)
+                            icon_text = icon_font.render(info['icon'], True, BLACK)
+                            icon_rect = icon_text.get_rect(center=(card_x + card_width // 2, card_y + 50))
+                            screen.blit(icon_text, icon_rect)
                         
                         # Name
                         name_font = pygame.font.Font(None, 32)
